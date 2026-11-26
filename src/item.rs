@@ -1,11 +1,13 @@
 //! How a Secret is laid out as an item of the vault, and read back: pure.
 //!
-//! One Secret is one item, titled `<service>/<account>` and tagged
+//! One Secret is one item, titled as [`Name::title`] says and tagged
 //! [`TAG`]. Its values are the fields of the section [`VALUES`], each
 //! labelled with its Field's label ([`SINGLE`] for a single value) and typed
-//! by its visibility ([`CONCEALED`] or [`STRING`]); its kind,
-//! description and shape are the fields of the section [`META`]. An item
-//! that is not this shape is refused by name, never guessed at.
+//! by its visibility ([`CONCEALED`] or [`STRING`]); its service, account,
+//! kind, description and shape are the fields of the section [`META`]. The
+//! name is read from that section, never from the title; an item an earlier
+//! optokens wrote, titled `<service>/<account>` without them, is read by its
+//! title. An item that is not this shape is refused by name, never guessed at.
 
 use crate::refusal::Refusal;
 use crate::secret::Visibility::{Concealed, Plain};
@@ -21,6 +23,8 @@ pub const VALUES: &str = "fields";
 /// The section of what optokens knows of the Secret.
 pub const META: &str = "optokens";
 /// [`META`]'s fields.
+pub const SERVICE: &str = "service";
+pub const ACCOUNT: &str = "account";
 pub const KIND: &str = "kind";
 pub const DESCRIPTION: &str = "description";
 pub const SHAPE: &str = "shape";
@@ -65,6 +69,8 @@ pub fn template(name: &Name, secret: &Secret) -> Value {
         })
         .collect();
     let meta = [
+        Some((SERVICE, name.service())),
+        Some((ACCOUNT, name.account())),
         Some((KIND, secret.kind.name())),
         Some((SHAPE, shape)),
         secret.description.as_deref().map(|d| (DESCRIPTION, d)),
@@ -101,7 +107,6 @@ fn layout(item: &Value) -> Result<(Name, Secret), String> {
     if !tagged(item) {
         return Err(format!("it has no tag `{TAG}`"));
     }
-    let name = Name::from_title(title).ok_or("its title is not `<service>/<account>`")?;
     // A section by its id, as op names it in each field: its label.
     let labels: Map<String, Value> = item["sections"]
         .as_array()
@@ -149,10 +154,19 @@ fn layout(item: &Value) -> Result<(Name, Secret), String> {
     };
     if let Some((stray, _)) = meta
         .iter()
-        .find(|(l, _)| ![KIND, SHAPE, DESCRIPTION].contains(&l.as_str()))
+        .find(|(l, _)| ![SERVICE, ACCOUNT, KIND, SHAPE, DESCRIPTION].contains(&l.as_str()))
     {
         return Err(format!("its section `{META}` has a field `{stray}`"));
     }
+    let name = match (one(SERVICE)?, one(ACCOUNT)?) {
+        (Some(service), Some(account)) => Name::new(&service, &account).map_err(|_| {
+            format!("its `{SERVICE}` `{service}` and `{ACCOUNT}` `{account}` are not a Secret's name")
+        })?,
+        (None, None) => Name::from_old_title(title).ok_or(format!(
+            "its section `{META}` has no `{SERVICE}` and `{ACCOUNT}`, and its title is not `<service>/<account>`"
+        ))?,
+        _ => return Err(format!("its section `{META}` has one of `{SERVICE}` and `{ACCOUNT}` without the other")),
+    };
     let kind = one(KIND)?.ok_or(format!("its section `{META}` has no `{KIND}`"))?;
     let kind = <Kind as clap::ValueEnum>::from_str(&kind, false)
         .map_err(|_| format!("its `{KIND}` is `{kind}`, neither static nor profile"))?;
@@ -201,47 +215,63 @@ fn tagged(item: &Value) -> bool {
         .is_some_and(|tags| tags.iter().any(|t| t == TAG))
 }
 
-/// The id of `name`'s item among `op item list --format json`'s summaries:
-/// `None` when there is none. An item of that title without the tag, or two
-/// with it, are refused.
-pub fn find(summaries: &Value, name: &Name) -> Result<Option<String>, Refusal> {
-    let title = name.title();
-    let mut ours = Vec::new();
+/// The ids of the items among `op item list --format json`'s summaries that
+/// may hold `name`'s Secret: those titled [`Name::title`] or
+/// [`Name::old_title`]. Which one does is for [`read`] to say, as another
+/// Secret's title may be the same (`a.b` is `a.b/default` and `a/b`). An item
+/// of either title without the tag is refused.
+pub fn candidates(summaries: &Value, name: &Name) -> Result<Vec<String>, Refusal> {
+    let titles = [name.title(), name.old_title()];
+    let mut ids = Vec::new();
     for item in summaries.as_array().into_iter().flatten() {
-        if item["title"] != title.as_str() {
+        if !titles.iter().any(|t| item["title"] == t.as_str()) {
             continue;
         }
         if !tagged(item) {
             return Err(read(item).expect_err("an item without the tag is refused"));
         }
-        ours.push(item["id"].as_str().unwrap_or_default().to_string());
+        ids.push(item["id"].as_str().unwrap_or_default().to_string());
     }
-    match ours.as_slice() {
-        [] => Ok(None),
-        [id] => Ok(Some(id.clone())),
-        ids => Err(Refusal::of(
-            &Fault::Ambiguous,
-            format!(
-                "the vault has {} items `{title}` tagged `{TAG}`: {}",
-                ids.len(),
-                ids.join(", ")
-            ),
-            format!("delete all but one of the items `{title}` in 1Password"),
-        )),
-    }
+    Ok(ids)
 }
 
-/// The ids of the items optokens wrote, by their tag, in title order.
+/// Refused when more than one item, `ids`, holds `name`'s Secret.
+pub fn unique(name: &Name, ids: &[&str]) -> Result<(), Refusal> {
+    if ids.len() < 2 {
+        return Ok(());
+    }
+    Err(Refusal::of(
+        &Fault::Ambiguous,
+        format!(
+            "the vault has {} items of the Secret `{name}` tagged `{TAG}`: {}",
+            ids.len(),
+            ids.join(", ")
+        ),
+        format!(
+            "delete all but one of the items {} in 1Password",
+            ids.join(", ")
+        ),
+    ))
+}
+
+/// Whether `item`, read as `name`'s, is in this optokens' layout: titled
+/// [`Name::title`], its name in [`META`]. `put` rewrites one that is not.
+pub fn current(item: &Value, name: &Name) -> bool {
+    let has = |label: &str| {
+        item["fields"].as_array().into_iter().flatten().any(|f| {
+            f["label"] == label && (f["section"]["label"] == META || f["section"]["id"] == META)
+        })
+    };
+    item["title"] == name.title().as_str() && has(SERVICE) && has(ACCOUNT)
+}
+
+/// The ids of the items optokens wrote, by their tag.
 pub fn ours(summaries: &Value) -> Vec<String> {
-    let mut items: Vec<&Value> = summaries
+    summaries
         .as_array()
         .into_iter()
         .flatten()
         .filter(|item| tagged(item))
-        .collect();
-    items.sort_by_key(|item| item["title"].as_str().unwrap_or_default().to_string());
-    items
-        .iter()
         .map(|item| item["id"].as_str().unwrap_or_default().to_string())
         .collect()
 }
@@ -281,13 +311,15 @@ mod tests {
         assert_eq!(
             template(&name, &secret),
             json!({
-                "title": "aws/ci",
+                "title": "aws.ci",
                 "category": "SECURE_NOTE",
                 "tags": ["optokens"],
                 "sections": [{ "id": "fields", "label": "fields" }, { "id": "optokens", "label": "optokens" }],
                 "fields": [
                     { "id": "fields.0", "section": { "id": "fields" }, "type": "STRING", "label": "Access Key ID", "value": "AKIA" },
                     { "id": "fields.1", "section": { "id": "fields" }, "type": "CONCEALED", "label": "Secret", "value": "s" },
+                    { "id": "optokens.service", "section": { "id": "optokens" }, "type": "STRING", "label": "service", "value": "aws" },
+                    { "id": "optokens.account", "section": { "id": "optokens" }, "type": "STRING", "label": "account", "value": "ci" },
                     { "id": "optokens.kind", "section": { "id": "optokens" }, "type": "STRING", "label": "kind", "value": "static" },
                     { "id": "optokens.shape", "section": { "id": "optokens" }, "type": "STRING", "label": "shape", "value": "fields" },
                     { "id": "optokens.description", "section": { "id": "optokens" }, "type": "STRING", "label": "description", "value": "CI deploy" },
@@ -333,14 +365,14 @@ mod tests {
         };
         assert_eq!(
             why(&|i| i["tags"] = json!([])),
-            "the vault's item `aws/ci` is not a Secret optokens wrote: it has no tag `optokens`"
+            "the vault's item `aws.ci` is not a Secret optokens wrote: it has no tag `optokens`"
         );
         assert!(
-            why(&|i| i["fields"][3]["value"] = json!("parent"))
+            why(&|i| i["fields"][5]["value"] = json!("parent"))
                 .ends_with("its `kind` is `parent`, neither static nor profile")
         );
         assert!(
-            why(&|i| i["fields"][4]["value"] = json!("value"))
+            why(&|i| i["fields"][6]["value"] = json!("value"))
                 .ends_with("its section `fields` is not one field `value`")
         );
         let single = Secret {
@@ -357,7 +389,7 @@ mod tests {
                 .ends_with("its section `fields` is not one field `value`")
         );
         assert!(
-            why(&|i| i["fields"][3]["label"] = json!("level"))
+            why(&|i| i["fields"][5]["label"] = json!("level"))
                 .ends_with("its section `optokens` has a field `level`")
         );
         assert!(
@@ -378,48 +410,103 @@ mod tests {
                 .ends_with("has the label `Access Key ID` empty or twice")
         );
         assert!(
-            why(&|i| i["title"] = json!("aws")).ends_with("its title is not `<service>/<account>`")
+            why(&|i| {
+                i["fields"].as_array_mut().unwrap().remove(4);
+            })
+            .ends_with("has one of `service` and `account` without the other")
+        );
+        assert!(
+            why(&|i| i["fields"][3]["value"] = json!("a/b"))
+                .ends_with("its `service` `a/b` and `account` `ci` are not a Secret's name")
         );
     }
 
+    /// An item as an earlier optokens wrote it: titled `<service>/<account>`,
+    /// no name in its section.
+    fn old(name: &Name, secret: &Secret) -> Value {
+        let mut item = stored(&template(name, secret));
+        item["title"] = json!(name.old_title());
+        item["fields"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|f| f["label"] != SERVICE && f["label"] != ACCOUNT);
+        item
+    }
+
     #[test]
-    fn find_takes_the_one_tagged_item_and_refuses_a_stranger_or_two() {
+    fn the_name_is_read_from_the_section_never_split_from_the_title() {
+        let (_, secret) = secret();
+        let dotted = Name::new("name.com", "default").unwrap();
+        let item = stored(&template(&dotted, &secret));
+        assert_eq!(item["title"], "name.com");
+        assert_eq!(read(&item).unwrap(), (dotted.clone(), secret.clone()));
+        assert!(current(&item, &dotted));
+        let account = Name::new("name", "com").unwrap();
+        assert_eq!(account.title(), "name.com");
+        assert_ne!(read(&item).unwrap().0, account);
+    }
+
+    #[test]
+    fn an_item_an_earlier_optokens_wrote_is_read_by_its_title_and_is_not_current() {
+        let (name, secret) = secret();
+        let item = old(&name, &secret);
+        assert_eq!(item["title"], "aws/ci");
+        assert_eq!(read(&item).unwrap(), (name.clone(), secret.clone()));
+        assert!(!current(&item, &name));
+        let mut titled = stored(&template(&name, &secret));
+        assert!(current(&titled, &name));
+        titled["title"] = json!("aws/ci");
+        assert!(
+            !current(&titled, &name),
+            "an old title with the new section is rewritten"
+        );
+        let mut untitled = item.clone();
+        untitled["title"] = json!("aws");
+        assert!(read(&untitled).unwrap_err().fault.ends_with(
+            "its section `optokens` has no `service` and `account`, and its title is not `<service>/<account>`"
+        ));
+    }
+
+    #[test]
+    fn candidates_are_the_tagged_items_of_either_title_and_a_stranger_is_refused() {
         let name = Name::new("aws", "ci").unwrap();
         let item =
             |id: &str, title: &str, tags: Value| json!({ "id": id, "title": title, "tags": tags });
         let list = json!([
-            item("1", "aws/ci", json!(["optokens"])),
-            item("2", "gh/default", json!(["optokens"]))
+            item("1", "aws.ci", json!(["optokens"])),
+            item("2", "gh", json!(["optokens"])),
+            item("3", "aws/ci", json!(["optokens", "x"])),
+            item("5", "aws", json!(["optokens"]))
         ]);
-        assert_eq!(find(&list, &name).unwrap(), Some("1".into()));
-        assert_eq!(find(&json!([]), &name).unwrap(), None);
-        let stranger = json!([item("3", "aws/ci", Value::Null)]);
-        assert_eq!(
-            find(&stranger, &name).unwrap_err().kind,
-            Some("not_optokens")
-        );
-        let two = json!([
-            item("1", "aws/ci", json!(["optokens"])),
-            item("4", "aws/ci", json!(["optokens", "x"]))
-        ]);
-        let refused = find(&two, &name).unwrap_err();
+        assert_eq!(candidates(&list, &name).unwrap(), ["1", "3"]);
+        assert!(candidates(&json!([]), &name).unwrap().is_empty());
+        for title in ["aws.ci", "aws/ci"] {
+            let stranger = json!([item("3", title, Value::Null)]);
+            assert_eq!(
+                candidates(&stranger, &name).unwrap_err().kind,
+                Some("not_optokens")
+            );
+        }
+        assert!(unique(&name, &["1"]).is_ok());
+        let refused = unique(&name, &["1", "4"]).unwrap_err();
+        assert_eq!(refused.kind, Some("ambiguous"));
         assert_eq!(
             refused.fault,
-            "the vault has 2 items `aws/ci` tagged `optokens`: 1, 4"
+            "the vault has 2 items of the Secret `aws/ci` tagged `optokens`: 1, 4"
         );
         let mixed = json!([
             item("9", "z/default", json!(["optokens"])),
             item("8", "other", json!([])),
             item("7", "a/default", json!(["optokens"]))
         ]);
-        assert_eq!(ours(&mixed), ["7", "9"]);
+        assert_eq!(ours(&mixed), ["9", "7"]);
     }
 
     fn any_secret() -> impl Strategy<Value = (Name, Secret)> {
         let label = "[^/]{1,8}";
         (
-            "[a-z0-9-]{1,8}",
-            "[a-z0-9-]{1,8}",
+            "[a-z0-9.-]{1,8}",
+            "[a-z0-9.-]{1,8}",
             prop_oneof![Just(Kind::Static), Just(Kind::Profile)],
             proptest::option::of(".{0,12}"),
             prop_oneof![
@@ -452,7 +539,8 @@ mod tests {
     proptest! {
         #[test]
         fn any_secret_laid_out_and_read_back_is_equal((name, secret) in any_secret()) {
-            prop_assert_eq!(read(&stored(&template(&name, &secret))).unwrap(), (name, secret));
+            prop_assert_eq!(read(&stored(&template(&name, &secret))).unwrap(), (name.clone(), secret.clone()));
+            prop_assert_eq!(read(&old(&name, &secret)).unwrap(), (name, secret));
         }
     }
 }

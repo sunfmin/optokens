@@ -21,10 +21,12 @@ pub struct Store {
     vault: String,
 }
 
-/// A Secret found in the vault: its item's id, and what it holds.
+/// A Secret found in the vault: its item's id, what it holds, and whether
+/// the item is in this optokens' layout ([`item::current`]).
 pub struct Found {
     pub id: String,
     pub secret: Secret,
+    pub current: bool,
 }
 
 impl Store {
@@ -89,16 +91,28 @@ impl Store {
         })
     }
 
-    /// `name`'s Secret, `None` when the vault has none.
+    /// `name`'s Secret, `None` when the vault has none: the one item of its
+    /// title, or its earlier title, whose section names it.
     pub fn find(&self, name: &Name) -> Result<Option<Found>, Refusal> {
-        let Some(id) = item::find(&self.json(Call::List)?, name)? else {
-            return Ok(None);
-        };
-        let (_, secret) = item::read(&self.json(Call::Get(&id))?)?;
-        Ok(Some(Found { id, secret }))
+        let mut found = Vec::new();
+        for id in item::candidates(&self.json(Call::List)?, name)? {
+            let item = self.json(Call::Get(&id))?;
+            let (held, secret) = item::read(&item)?;
+            if held == *name {
+                let current = item::current(&item, name);
+                found.push(Found {
+                    id,
+                    secret,
+                    current,
+                });
+            }
+        }
+        let ids: Vec<&str> = found.iter().map(|f| f.id.as_str()).collect();
+        item::unique(name, &ids)?;
+        Ok(found.pop())
     }
 
-    /// Every Secret in the vault, by title; refused with every item that is
+    /// Every Secret in the vault, by service, then account; refused with every item that is
     /// not optokens' layout.
     pub fn all(&self) -> Result<Vec<(Name, Secret)>, Vec<Refusal>> {
         let list = self.json(Call::List).map_err(|r| vec![r])?;
@@ -110,6 +124,7 @@ impl Store {
             }
         }
         if faults.is_empty() {
+            found.sort_by(|(a, _), (b, _)| a.cmp(b));
             Ok(found)
         } else {
             Err(faults)

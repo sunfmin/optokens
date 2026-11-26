@@ -99,7 +99,7 @@ fn put_list_get_env_rm_a_profile() {
     );
 
     assert_eq!(
-        host.field_types("glm/default"),
+        host.field_types("glm"),
         json!({ "ANTHROPIC_BASE_URL": "STRING", "ANTHROPIC_AUTH_TOKEN": "CONCEALED" }),
         "--set is plain, stdin concealed"
     );
@@ -223,7 +223,7 @@ fn a_fields_type_follows_how_its_value_came_in() {
             field("optokens", "shape", "fields")
         ])
     )]));
-    let types = || host.field_types("app/default");
+    let types = || host.field_types("app");
     assert_eq!(
         run(&host, &["get", "app", "--json"]).json()["fields"],
         json!({ "URL": "https://a", "TOKEN": "t", "USER": "u" })
@@ -452,7 +452,7 @@ fn two_pipes_are_stored_concealed_in_one_put_and_one_write() {
         ]
     );
     assert_eq!(
-        host.field_types("deploy-db/default"),
+        host.field_types("deploy-db"),
         json!({ "User": "STRING", "Password": "CONCEALED", "SigningKey": "CONCEALED" })
     );
     assert_eq!(
@@ -583,6 +583,151 @@ fn without_a_token_nothing_reaches_op() {
     assert_eq!((get.code, get.stdout.as_str()), (2, ""));
     assert_eq!(kinds(&get.error()), ["no_token"]);
     assert_eq!(host.calls(), Value::Null);
+}
+
+/// An item as an earlier optokens wrote it: titled `<service>/<account>`, no
+/// name in its section.
+fn old_bark(id: &str) -> Value {
+    stored(
+        id,
+        "bark/default",
+        json!(["optokens"]),
+        json!([
+            field("fields", "URL", "https://push/x"),
+            field("optokens", "kind", "static"),
+            field("optokens", "shape", "fields"),
+            field("optokens", "description", "phone push")
+        ]),
+    )
+}
+
+#[test]
+fn a_secret_titled_with_a_slash_is_found_by_every_command_and_put_retitles_it_in_place() {
+    let host = seeded(json!([old_bark("o1")]));
+    let got = run(&host, &["get", "bark", "--field", "URL"]);
+    assert_eq!((got.code, got.stdout.as_str()), (0, "https://push/x"));
+    assert_eq!(
+        run(&host, &["env", "bark"]).stdout,
+        "export URL='https://push/x'\n"
+    );
+    assert_eq!(
+        run(&host, &["list"]).json(),
+        json!({ "secrets": [{ "service": "bark", "account": "default", "kind": "static",
+                              "description": "phone push", "fields": ["URL"] }] })
+    );
+    let items = || host.state()["op"]["items"].clone();
+    assert_eq!(
+        items()[0]["title"],
+        "bark/default",
+        "reading rewrites nothing"
+    );
+
+    // A put that changes no value still rewrites the item, under its new title.
+    let put = run(&host, &["put", "bark", "--set", "URL=https://push/x"]);
+    assert_eq!(
+        put.json(),
+        json!({ "secret": "bark/default", "changed": true, "kind": "static", "fields": ["URL"] })
+    );
+    assert_eq!(
+        op_lines(&host).last().unwrap(),
+        "item edit o1 --vault optokens --format json"
+    );
+    assert_eq!(items().as_array().unwrap().len(), 1);
+    assert_eq!(items()[0]["id"], "o1");
+    assert_eq!(items()[0]["title"], "bark");
+    assert_eq!(
+        run(&host, &["get", "bark", "--json"]).json(),
+        json!({ "service": "bark", "account": "default", "kind": "static",
+                "description": "phone push", "fields": { "URL": "https://push/x" } })
+    );
+    let meta: Vec<(String, String)> = items()[0]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["section"]["label"] == "optokens")
+        .map(|f| {
+            (
+                f["label"].as_str().unwrap().into(),
+                f["value"].as_str().unwrap().into(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        meta,
+        [
+            ("service", "bark"),
+            ("account", "default"),
+            ("kind", "static"),
+            ("shape", "fields"),
+            ("description", "phone push")
+        ]
+        .map(|(l, v)| (l.to_string(), v.to_string()))
+    );
+    assert_eq!(
+        run(&host, &["put", "bark", "--set", "URL=https://push/x"]).json()["changed"],
+        false
+    );
+
+    // Both titles of one Secret are two items of it, refused; rm names both.
+    let mut state = host.state();
+    state["op"]["items"]
+        .as_array_mut()
+        .unwrap()
+        .push(old_bark("o2"));
+    host.set_state(&state);
+    let two = run(&host, &["get", "bark"]);
+    assert_eq!(kinds(&two.error()), ["ambiguous"]);
+    assert_eq!(
+        two.error()["error"][0]["fault"],
+        "the vault has 2 items of the Secret `bark/default` tagged `optokens`: o2, o1"
+    );
+}
+
+#[test]
+fn a_title_two_secrets_share_holds_each_by_its_section() {
+    let host = host();
+    for (args, value) in [
+        (&["put", "name.com", "--set", "K=dotted"][..], "dotted"),
+        (
+            &["put", "name", "--account", "com", "--set", "K=account"][..],
+            "account",
+        ),
+    ] {
+        assert_eq!(run(&host, args).json()["changed"], true, "{value}");
+    }
+    let titles: Vec<Value> = host.state()["op"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["title"].clone())
+        .collect();
+    assert_eq!(titles, ["name.com", "name.com"]);
+    assert_eq!(
+        run(&host, &["get", "name.com", "--field", "K"]).stdout,
+        "dotted"
+    );
+    assert_eq!(
+        run(&host, &["get", "name", "--account", "com", "--field", "K"]).stdout,
+        "account"
+    );
+    assert_eq!(
+        run(&host, &["list"]).json()["secrets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| format!(
+                "{}/{}",
+                s["service"].as_str().unwrap(),
+                s["account"].as_str().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        ["name/com", "name.com/default"]
+    );
+    assert_eq!(run(&host, &["rm", "name.com"]).json()["changed"], true);
+    assert_eq!(
+        run(&host, &["get", "name", "--account", "com", "--field", "K"]).stdout,
+        "account"
+    );
 }
 
 #[test]
