@@ -1,0 +1,10 @@
+{
+  "tree": "6ff7869822883c7d20b3e2bff62e8ef023340272+d1fba762150c532c",
+  "lines": 351,
+  "serves": "optokens#5",
+  "considered": "src/link (the one-time link's pure rules: page, endpoint, scheme, submission) reused whole for what the server answers; src/op.rs and secret::merge reused for the store, so put through the link adds only the sockets, TLS and HTTP parsing (src/serve.rs), the link's fields from the put (commands::link_for), help, and the binary tests with their tailscale stand-in",
+  "reviewer": "codex:01a217c8-6550-7b71-abe8-cc12a60b7c28:default",
+  "author": "claude-code:7e8f1190-f45f-5aca-b4ca-6ae9e2eee87a:opus",
+  "cut": "In src/commands.rs, keep the validated Secret returned by secret::merge and fill its single value or requested fields from the submission, deleting the reverse walk over placeholder fields and the second merge. In src/link/endpoint.rs and src/serve.rs, have listen_address take a binding callback and return the selected listener, preserving IPv4 preference and refusals while removing the two intermediate vectors and address lookup. In src/serve.rs, keep the buffered body prefix and use Read::read_exact for the remainder within the existing body limit. In src/secret.rs, combine the two match arms that clone a single value.",
+  "answer": "Made all four cuts: put_secret keeps merge's Secret and fills its values from the submission (no second merge, no reverse walk); listen_address takes a bind callback and returns the listener, IPv4 first, refusals kept; read_request reads the body's rest with read_exact under BODY_MAX; secret.rs's two single-value arms are one. The rest is the server, its tests and help the issue asks for."
+}
