@@ -1,0 +1,28 @@
+{
+  "tree": "11ddcde49ae25866af11d660610674d5aa0824ff+fc38f86935d66481",
+  "picker": "codex:01a218e8-1dba-7653-89ce-2bc39509edb3:default",
+  "author": "claude-code:a61c1660-1d62-5154-afaf-da36a1f6aaa3:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/commands.rs:110:36: replace + with * in put_secret",
+        "why": "Malformed pipe arguments would always be reported as number 0, and the tests check their fault kind without checking their position.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/pipe.rs:35:8: delete ! in open",
+        "why": "The Bash process-substitution tests exercise Unix paths, leaving the Windows named-pipe prefix guard untested.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/pipe.rs:41:11: replace == with != in open",
+        "why": "The regular-file refusal test exercises Unix metadata, leaving the Windows check of the opened handle's type untested.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  },
+  "added_lines": 99
+}

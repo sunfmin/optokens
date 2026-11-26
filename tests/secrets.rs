@@ -491,6 +491,11 @@ fn a_pipe_that_is_no_pipe_or_empty_is_refused_before_the_vault() {
         refused.json()["error"][0]["fault"],
         "`--field-from-pipe File=` names no pipe that can be read"
     );
+    assert_eq!(
+        refused.json()["error"][4]["fault"],
+        "`--field-from-pipe` number 5 names no `Label=` before its pipe",
+        "an unlabelled pipe is named by its place, counted from 1"
+    );
     assert!(
         !refused.stdout.contains(MARKER) && !refused.stderr.contains(MARKER),
         "{}{}",
