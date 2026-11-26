@@ -68,6 +68,16 @@ fn the_right_token_submits_once_then_every_request_is_gone() {
     let path = link.path();
     let (first, submitted) = link.handle(&post(&path, "f0=s3cr%26t+x"), t0());
     assert_eq!(first.status, 200);
+    assert!(
+        first.body.contains("<h1>svc/default</h1>"),
+        "{}",
+        first.body
+    );
+    assert!(
+        first.body.contains("This link no longer works."),
+        "{}",
+        first.body
+    );
     assert!(!first.body.contains("s3cr"), "the value is echoed");
     assert_eq!(submitted, values(&[("Token", "s3cr&t x")]));
     for request in [post(&path, "f0=other"), get(&path)] {
@@ -114,6 +124,15 @@ fn a_wrong_path_is_not_found_and_tells_a_stranger_nothing() {
         link.handle(&post(&path, "f0=good"), t0()).1,
         values(&[("Token", "good")])
     );
+}
+
+#[test]
+fn paths_differing_in_several_bytes_are_not_the_same() {
+    // Each pair's byte differences cancel under XOR: only an OR of them catches both.
+    assert!(!same(b"ab", b"ba"));
+    assert!(!same(b"/01", b"/10"));
+    assert!(same(b"/ab", b"/ab"));
+    assert!(!same(b"/ab", b"/abc"));
 }
 
 #[test]
