@@ -166,7 +166,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads the Secret from the vault, merges into it what this `put` names, and writes it back as one item, only when that changes it. A Field not named is kept. `--set "NAME=value"` sets a Field that is not secret, split on the first `=`, stored as plain text; repeat it. `--field-from-stdin <Label>` sets one Field to all of stdin, one trailing newline dropped, stored concealed: for a secret a command makes and pipes in, such as `openssl rand -base64 32 | optokens put deploy-db --set "Username=svc" --field-from-stdin Password`. `--field-from-pipe <Label>=<(command)` sets a Field to all the command prints, one trailing newline dropped, stored concealed; repeat it to store several generated secrets in one `put`, such as `optokens put deploy-db --set "Username=svc" --field-from-pipe Password=<(openssl rand -base64 32) --field-from-pipe SigningKey=<(openssl rand -hex 32)`. The shell (bash, zsh) runs each command and puts only its pipe's path, `/dev/fd/N`, on the command line; `put` reads each pipe to its end and refuses any path that is not a pipe, a file among them. On Windows, PowerShell has no `<(command)`: the path must be a named pipe, `\\.\pipe\<name>`, or use one `put --field-from-stdin` per value. `--description` replaces the description; alone, for a stored Secret, it changes nothing else. A new Secret is `static` unless `--kind profile`. A Profile's labels are environment variables' names, for `env`. How a Secret is laid out in the vault: [Secrets in the vault](help:secrets).
+    /// It reads the Secret from the vault, merges into it what this `put` names, and writes it back as one item, only when that changes it. A Field not named is kept. `--set "NAME=value"` sets a Field that is not secret, split on the first `=`, stored as plain text; repeat it. `--field-from-stdin <Label>` sets one Field to all of stdin, one trailing newline dropped, stored concealed: for a secret a command makes and pipes in, such as `openssl rand -base64 32 | optokens put deploy-db --set "Username=svc" --field-from-stdin Password`. `--field-from-pipe <Label>=<(command)` sets a Field to all the command prints, one trailing newline dropped, stored concealed; repeat it to store several generated secrets in one `put`, such as `optokens put deploy-db --set "Username=svc" --field-from-pipe Password=<(openssl rand -base64 32) --field-from-pipe SigningKey=<(openssl rand -hex 32)`. The shell (bash, zsh) runs each command and puts only its pipe's path, `/dev/fd/N`, on the command line; `put` reads each pipe to its end and refuses any path that is not a pipe, a file among them. On Windows, PowerShell has no `<(command)`: the path must be a named pipe, `\\.\pipe\<name>`, or use one `put --field-from-stdin` per value. `--description` replaces the description; alone, for a stored Secret, it changes nothing else. `--meta '<json>'` replaces the Secret's Meta, structured data about it for a program to read (a Cloudflare `account_id`), one JSON object; a `put` without it keeps the stored one, and alone, for a stored Secret, it changes nothing else. Anything but one JSON object is refused (`bad_meta`). A new Secret is `static` unless `--kind profile`. A Profile's labels are environment variables' names, for `env`. How a Secret is laid out in the vault: [Secrets in the vault](help:secrets).
     ///
     /// ## The one-time link
     ///
@@ -193,7 +193,7 @@ enum Cmd {
     ///
     /// ## What it may refuse
     ///
-    /// Every fault it finds, before it serves a link or writes anything: `bad_name`, `bad_set`, `bad_show`, `duplicate_label`, `not_env_name`, `kind_change`, `shape_change`, `stdin_terminal`, `stdin_empty`, `stdin_not_text`, `not_a_pipe`, `pipe_empty`, `pipe_not_text`, the service account's faults ([the token and the vault](help:account)), and the vault's (`not_optokens`, `ambiguous`, `op_failed`); then `link_expired`, when no one submitted the link in time. Each is in [Secrets in the vault](help:secrets), with its fix. Without a tailnet to serve the link on, `tailscale_missing` or `no_tailnet_address`, as `optokens doctor --help` lists them, and a fault naming a tailnet address that is on no interface of this host.
+    /// Every fault it finds, before it serves a link or writes anything: `bad_name`, `bad_set`, `bad_meta`, `bad_show`, `duplicate_label`, `not_env_name`, `kind_change`, `shape_change`, `stdin_terminal`, `stdin_empty`, `stdin_not_text`, `not_a_pipe`, `pipe_empty`, `pipe_not_text`, the service account's faults ([the token and the vault](help:account)), and the vault's (`not_optokens`, `ambiguous`, `op_failed`); then `link_expired`, when no one submitted the link in time. Each is in [Secrets in the vault](help:secrets), with its fix. Without a tailnet to serve the link on, `tailscale_missing` or `no_tailnet_address`, as `optokens doctor --help` lists them, and a fault naming a tailnet address that is on no interface of this host.
     ///
     /// ## What trips you up
     ///
@@ -216,10 +216,10 @@ enum Cmd {
     ///
     /// ## What it answers
     ///
-    /// The single value, or the Field `--field` names, raw on stdout with no newline. A Secret of labelled Fields needs `--field`. With `--json`, one JSON object: `service`, `account`, `kind`, `description` (or `null`), and `fields`, each label with its value (or `value`, for a single value):
+    /// The single value, or the Field `--field` names, raw on stdout with no newline. A Secret of labelled Fields needs `--field`. With `--json`, one JSON object: `service`, `account`, `kind`, `description` (or `null`), `meta`, the Meta (or `null`), and `fields`, each label with its value (or `value`, for a single value):
     ///
     /// ```json
-    /// { "service": "aws", "account": "ci", "kind": "static", "description": "CI deploy", "fields": { "Access Key ID": "AKIA...", "Secret Access Key": "..." } }
+    /// { "service": "aws", "account": "ci", "kind": "static", "description": "CI deploy", "meta": { "region": "us-east-1" }, "fields": { "Access Key ID": "AKIA...", "Secret Access Key": "..." } }
     /// ```
     ///
     /// ## What it may refuse
@@ -280,7 +280,7 @@ enum Cmd {
         #[arg(long, default_value = secret::DEFAULT_ACCOUNT, verbatim_doc_comment)]
         account: String,
     },
-    /// Lists every Secret in the vault, with its kind, description and Field labels, never a value.
+    /// Lists every Secret in the vault, with its kind, description, Meta and Field labels, never a value.
     ///
     /// ## When to run it
     ///
@@ -292,10 +292,10 @@ enum Cmd {
     ///
     /// ## What it answers
     ///
-    /// `secrets`, by service, then account, each with `service`, `account`, `kind`, `description` (or `null`) and `fields`, its labels (`null` for a single value):
+    /// `secrets`, by service, then account, each with `service`, `account`, `kind`, `description` (or `null`), `meta`, the Meta (or `null`), and `fields`, its labels (`null` for a single value):
     ///
     /// ```json
-    /// { "secrets": [ { "service": "glm", "account": "default", "kind": "profile", "description": "Claude Code to GLM", "fields": ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] } ] }
+    /// { "secrets": [ { "service": "glm", "account": "default", "kind": "profile", "description": "Claude Code to GLM", "meta": null, "fields": ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] } ] }
     /// ```
     ///
     /// ## What it may refuse
@@ -360,7 +360,7 @@ struct AccountTopic;
 ///
 /// ## One item per Secret
 ///
-/// A Secret is one item of the vault, of the category `{const:CATEGORY}`, titled `<service>`, or `<service>.<account>` when the account is not `{const:DEFAULT_ACCOUNT}`, and tagged `{const:TAG}`. The title holds no `/`, so `op read "op://<vault>/<title>/{const:VALUES}/<Label>"` reads a Field. Its values are the fields of the section `{const:VALUES}`, each labelled with its Field's label (a single value is one field, `{const:SINGLE}`). Its service (`{const:SERVICE}`), its account (`{const:ACCOUNT}`), its kind, its description and whether it is a single value are the fields of the section `{const:META}`, so a Field may be called `kind` or `description` without a clash.
+/// A Secret is one item of the vault, of the category `{const:CATEGORY}`, titled `<service>`, or `<service>.<account>` when the account is not `{const:DEFAULT_ACCOUNT}`, and tagged `{const:TAG}`. The title holds no `/`, so `op read "op://<vault>/<title>/{const:VALUES}/<Label>"` reads a Field. Its values are the fields of the section `{const:VALUES}`, each labelled with its Field's label (a single value is one field, `{const:SINGLE}`). Its service (`{const:SERVICE}`), its account (`{const:ACCOUNT}`), its kind, its description, whether it is a single value, and its Meta (`{const:META_FIELD}`, one JSON object written compact, absent when it has none) are the fields of the section `{const:META}`, so a Field may be called `kind` or `description` without a clash. An item without `{const:META_FIELD}`, as one written before Meta, is a Secret with no Meta; one whose `{const:META_FIELD}` is not a JSON object is refused (`not_optokens`).
 ///
 /// optokens takes a Secret's name from the fields `{const:SERVICE}` and `{const:ACCOUNT}`, never from the title: a service may hold a `.`, so `a.b` is the title of both `a.b` and `a --account b`, each found by its own section. An item an earlier optokens titled `<service>/<account>`, without those fields, is still read by its title; the next `put` of that Secret rewrites it, the same item, under its new title.
 ///
@@ -404,6 +404,7 @@ pub(crate) fn help() -> Help {
         .constant("VALUES", item::VALUES)
         .constant("META", item::META)
         .constant("SINGLE", item::SINGLE)
+        .constant("META_FIELD", item::META_FIELD)
         .constant("STRING", item::STRING)
         .constant("CONCEALED", item::CONCEALED)
         .constant("LINK_MINUTES", crate::link::LIFETIME.as_secs() / 60)

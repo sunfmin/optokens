@@ -4,7 +4,8 @@
 //! [`TAG`]. Its values are the fields of the section [`VALUES`], each
 //! labelled with its Field's label ([`SINGLE`] for a single value) and typed
 //! by its visibility ([`CONCEALED`] or [`STRING`]); its service, account,
-//! kind, description and shape are the fields of the section [`META`]. The
+//! kind, description, shape and Meta (compact JSON, [`META_FIELD`]) are the
+//! fields of the section [`META`]. The
 //! name is read from that section, never from the title; an item an earlier
 //! optokens wrote, titled `<service>/<account>` without them, is read by its
 //! title. An item that is not this shape is refused by name, never guessed at.
@@ -28,6 +29,8 @@ pub const ACCOUNT: &str = "account";
 pub const KIND: &str = "kind";
 pub const DESCRIPTION: &str = "description";
 pub const SHAPE: &str = "shape";
+/// The Secret's Meta, one JSON object written compact; absent when it has none.
+pub const META_FIELD: &str = "meta";
 /// [`SHAPE`]'s values: a single value, or labelled Fields.
 pub const SHAPE_SINGLE: &str = "value";
 pub const SHAPE_FIELDS: &str = "fields";
@@ -68,12 +71,17 @@ pub fn template(name: &Name, secret: &Secret) -> Value {
             )
         })
         .collect();
+    let data = secret
+        .meta
+        .as_ref()
+        .map(|m| Value::Object(m.clone()).to_string());
     let meta = [
         Some((SERVICE, name.service())),
         Some((ACCOUNT, name.account())),
         Some((KIND, secret.kind.name())),
         Some((SHAPE, shape)),
         secret.description.as_deref().map(|d| (DESCRIPTION, d)),
+        data.as_deref().map(|m| (META_FIELD, m)),
     ];
     fields.extend(
         meta.into_iter()
@@ -152,10 +160,9 @@ fn layout(item: &Value) -> Result<(Name, Secret), String> {
             None => Ok(first),
         }
     };
-    if let Some((stray, _)) = meta
-        .iter()
-        .find(|(l, _)| ![SERVICE, ACCOUNT, KIND, SHAPE, DESCRIPTION].contains(&l.as_str()))
-    {
+    if let Some((stray, _)) = meta.iter().find(|(l, _)| {
+        ![SERVICE, ACCOUNT, KIND, SHAPE, DESCRIPTION, META_FIELD].contains(&l.as_str())
+    }) {
         return Err(format!("its section `{META}` has a field `{stray}`"));
     }
     let name = match (one(SERVICE)?, one(ACCOUNT)?) {
@@ -171,6 +178,14 @@ fn layout(item: &Value) -> Result<(Name, Secret), String> {
     let kind = <Kind as clap::ValueEnum>::from_str(&kind, false)
         .map_err(|_| format!("its `{KIND}` is `{kind}`, neither static nor profile"))?;
     let description = one(DESCRIPTION)?;
+    // An item written before Meta has no field of it: a Secret with none.
+    let meta = match one(META_FIELD)? {
+        None => None,
+        Some(data) => match serde_json::from_str::<Value>(&data) {
+            Ok(Value::Object(meta)) => Some(meta),
+            _ => return Err(format!("its `{META_FIELD}` is not a JSON object")),
+        },
+    };
     let values = match one(SHAPE)?.as_deref() {
         Some(SHAPE_SINGLE) => match values.as_slice() {
             [field] if field.label == SINGLE => Values::Single(field.value.clone()),
@@ -204,6 +219,7 @@ fn layout(item: &Value) -> Result<(Name, Secret), String> {
         Secret {
             kind,
             description,
+            meta,
             values,
         },
     ))
@@ -297,6 +313,9 @@ mod tests {
             Secret {
                 kind: Kind::Static,
                 description: Some("CI deploy".into()),
+                meta: json!({ "region": "us-east-1", "n": [1] })
+                    .as_object()
+                    .cloned(),
                 values: Values::Fields(vec![
                     Field::new("Access Key ID", "AKIA", Plain),
                     Field::new("Secret", "s", Concealed),
@@ -323,6 +342,7 @@ mod tests {
                     { "id": "optokens.kind", "section": { "id": "optokens" }, "type": "STRING", "label": "kind", "value": "static" },
                     { "id": "optokens.shape", "section": { "id": "optokens" }, "type": "STRING", "label": "shape", "value": "fields" },
                     { "id": "optokens.description", "section": { "id": "optokens" }, "type": "STRING", "label": "description", "value": "CI deploy" },
+                    { "id": "optokens.meta", "section": { "id": "optokens" }, "type": "STRING", "label": "meta", "value": r#"{"n":[1],"region":"us-east-1"}"# },
                 ],
             })
         );
@@ -334,6 +354,7 @@ mod tests {
         let secret = Secret {
             kind: Kind::Profile,
             description: None,
+            meta: None,
             values: Values::Fields(vec![
                 Field::new("kind", "x", Plain),
                 Field::new("description", "y", Concealed),
@@ -378,6 +399,7 @@ mod tests {
         let single = Secret {
             kind: Kind::Static,
             description: None,
+            meta: None,
             values: Values::Single("v".into()),
         };
         let mut renamed = stored(&template(&name, &single));
@@ -415,6 +437,12 @@ mod tests {
             })
             .ends_with("has one of `service` and `account` without the other")
         );
+        for data in ["[1]", "{", "\"s\""] {
+            assert!(
+                why(&|i| i["fields"][8]["value"] = json!(data))
+                    .ends_with("its `meta` is not a JSON object")
+            );
+        }
         assert!(
             why(&|i| i["fields"][3]["value"] = json!("a/b"))
                 .ends_with("its `service` `a/b` and `account` `ci` are not a Secret's name")
@@ -541,6 +569,18 @@ mod tests {
             "[a-z0-9.-]{1,8}",
             prop_oneof![Just(Kind::Static), Just(Kind::Profile)],
             proptest::option::of(".{0,12}"),
+            proptest::option::of(
+                proptest::collection::btree_map(
+                    ".{0,6}",
+                    prop_oneof![
+                        any::<i64>().prop_map(Value::from),
+                        ".{0,8}".prop_map(Value::from),
+                        proptest::collection::vec(any::<bool>(), 0..3).prop_map(Value::from),
+                    ],
+                    0..4,
+                )
+                .prop_map(|m| m.into_iter().collect::<Map<String, Value>>()),
+            ),
             prop_oneof![
                 ".{0,12}".prop_map(Values::Single),
                 proptest::collection::btree_map(
@@ -556,12 +596,13 @@ mod tests {
                 )),
             ],
         )
-            .prop_map(|(service, account, kind, description, values)| {
+            .prop_map(|(service, account, kind, description, meta, values)| {
                 (
                     Name::new(&service, &account).unwrap(),
                     Secret {
                         kind,
                         description,
+                        meta,
                         values,
                     },
                 )

@@ -143,6 +143,7 @@ fn checks(store: &Store) -> Result<(), Refusal> {
     let secret = Secret {
         kind: Kind::Static,
         description: Some("optokens init's probe of read and write: it removes it at once".into()),
+        meta: None,
         values: Values::Single(link::random_hex(16)),
     };
     store

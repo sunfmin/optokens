@@ -1,6 +1,6 @@
 #!/bin/sh
 # The end-to-end check against a real 1Password vault and the real `op`:
-# put -> list -> get -> env -> put again (upsert) -> `op read op://` -> a put over the item retitled as
+# put (a Meta among it) -> list -> get -> env -> put again (upsert) -> `op read op://` -> a put over the item retitled as
 # an earlier optokens titled it -> a put of two pipes -> rm, each answer checked, the item and its field
 # types checked in the vault through `op item get`, and `ps` sampled during the put for the value. Outside the gate: it needs the network and a token.
 #
@@ -69,7 +69,7 @@ types() { # <when>
     map=$(printf '%s' "$item" | jq -c '[.fields[] | select(.section) | {(.section.label + "." + .label): .type}] | add')
     echo "$map"
     check "types $1: A STRING, TOKEN CONCEALED, metadata STRING" \
-        '. == {"fields.A":"STRING","fields.TOKEN":"CONCEALED","optokens.service":"STRING","optokens.account":"STRING","optokens.kind":"STRING","optokens.shape":"STRING","optokens.description":"STRING"}' "$map"
+        '. == {"fields.A":"STRING","fields.TOKEN":"CONCEALED","optokens.service":"STRING","optokens.account":"STRING","optokens.kind":"STRING","optokens.shape":"STRING","optokens.description":"STRING","optokens.meta":"STRING"}' "$map"
 }
 
 # ps sampled in a loop for as long as the put runs: the value must never show.
@@ -88,8 +88,8 @@ rm -f "$XDG_CONFIG_HOME/put.done"
 argv_watch >"$XDG_CONFIG_HOME/argv" &
 watcher=$!
 
-say "openssl rand -hex 16 | optokens put $service --description 'optokens e2e' --set A=1 --field-from-stdin TOKEN"
-out=$(printf '%s' "$value" | "$bin" put "$service" --description "optokens e2e" --set "A=1" --field-from-stdin TOKEN) ||
+say "openssl rand -hex 16 | optokens put $service --description 'optokens e2e' --meta '{ \"e2e\": 1 }' --set A=1 --field-from-stdin TOKEN"
+out=$(printf '%s' "$value" | "$bin" put "$service" --description "optokens e2e" --meta '{ "e2e": 1 }' --set "A=1" --field-from-stdin TOKEN) ||
     { rc=$?; printf '%s\n' "$out"; fail "put exited $rc"; }
 touch "$XDG_CONFIG_HOME/put.done"
 wait "$watcher"
@@ -107,10 +107,10 @@ printf '%s' "$item" | jq -c '{title, category, tags, sections: [.sections[]? | .
 check "the item is titled, tagged, a secure note" '.title == "'"$title"'" and .category == "SECURE_NOTE" and (.tags | index("optokens"))' "$item"
 check "values in section fields, metadata in section optokens" '
   [.fields[] | select(.section) | [.section.label, .label]] | sort
-  == [["fields","A"],["fields","TOKEN"],["optokens","account"],["optokens","description"],["optokens","kind"],["optokens","service"],["optokens","shape"]]' "$item"
-check "service, account default, kind static, shape fields, the description" '
+  == [["fields","A"],["fields","TOKEN"],["optokens","account"],["optokens","description"],["optokens","kind"],["optokens","meta"],["optokens","service"],["optokens","shape"]]' "$item"
+check "service, account default, kind static, shape fields, the description, the Meta compact" '
   [.fields[] | select(.section.label == "optokens") | {(.label): .value}] | add
-  == {"service":"'"$service"'","account":"default","kind":"static","shape":"fields","description":"optokens e2e"}' "$item"
+  == {"service":"'"$service"'","account":"default","kind":"static","shape":"fields","description":"optokens e2e","meta":"{\"e2e\":1}"}' "$item"
 printf '%s' "$item" | jq -e --arg v "$value" '[.fields[] | select(.section.label == "fields" and .label == "TOKEN")][0].value == $v' >/dev/null ||
     fail "the vault's TOKEN is not the value piped in"
 echo "ok: the vault's TOKEN is the value piped in"
@@ -119,7 +119,7 @@ types "after the put"
 say "optokens list"
 run list
 printf '%s' "$out" | jq -c --arg s "$service" '{secrets: [.secrets[] | select(.service == $s)], total: (.secrets | length)}'
-check "list shows it, no value" '[.secrets[] | select(.service == "'"$service"'")] == [{"service":"'"$service"'","account":"default","kind":"static","description":"optokens e2e","fields":["A","TOKEN"]}]' "$out"
+check "list shows it, no value" '[.secrets[] | select(.service == "'"$service"'")] == [{"service":"'"$service"'","account":"default","kind":"static","description":"optokens e2e","meta":{"e2e":1},"fields":["A","TOKEN"]}]' "$out"
 
 say "optokens get $service --field TOKEN  (compared, not printed)"
 got=$("$bin" get "$service" --field TOKEN) || fail "get --field TOKEN exited $?"
@@ -129,7 +129,7 @@ echo "ok: get --field TOKEN is the value"
 say "optokens get $service --json  (TOKEN masked)"
 run get "$service" --json
 printf '%s' "$out" | mask
-check "get --json" '.service == "'"$service"'" and .account == "default" and .kind == "static" and .description == "optokens e2e" and .fields.A == "1" and (.fields | keys_unsorted) == ["A","TOKEN"]' "$out"
+check "get --json" '.service == "'"$service"'" and .account == "default" and .kind == "static" and .description == "optokens e2e" and .meta == {"e2e":1} and .fields.A == "1" and (.fields | keys_unsorted) == ["A","TOKEN"]' "$out"
 printf '%s' "$out" | jq -e --arg v "$value" '.fields.TOKEN == $v' >/dev/null || fail "get --json TOKEN is not the value"
 
 say "optokens env $service  (TOKEN masked)"
@@ -174,9 +174,9 @@ item=$(op item get "$id" --vault "$vault" --format json)
 check "the same item, retitled $title, its service and account back" '.id == "'"$id"'" and .title == "'"$title"'"' "$item"
 types "after the retitle"
 run get "$service" --json
-printf '%s' "$out" | jq -e --arg v "$value" '.fields.A == "2" and .fields.TOKEN == $v and .description == "optokens e2e"' >/dev/null ||
-    fail "the retitle changed a value or the description"
-echo "ok: A, TOKEN and the description are as they were"
+printf '%s' "$out" | jq -e --arg v "$value" '.fields.A == "2" and .fields.TOKEN == $v and .description == "optokens e2e" and .meta == {"e2e":1}' >/dev/null ||
+    fail "the retitle changed a value, the description or the Meta"
+echo "ok: A, TOKEN, the description and the Meta are as they were"
 
 pipe1=$(openssl rand -hex 16) pipe2=$(openssl rand -base64 24)
 say "optokens put $service --field-from-pipe PIPE1=<(printf ...) --field-from-pipe PIPE2=<(printf ...)  (bash; values from openssl rand)"

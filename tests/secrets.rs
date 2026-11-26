@@ -138,7 +138,7 @@ fn put_list_get_env_rm_a_profile() {
     assert_eq!(list.code, 0);
     assert_eq!(
         list.json(),
-        json!({ "secrets": [{ "service": "glm", "account": "default", "kind": "profile", "description": "Claude Code to GLM",
+        json!({ "secrets": [{ "service": "glm", "account": "default", "kind": "profile", "description": "Claude Code to GLM", "meta": null,
                               "fields": ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL"] }] })
     );
     assert!(!list.stdout.contains("tok'en"), "{}", list.stdout);
@@ -151,7 +151,7 @@ fn put_list_get_env_rm_a_profile() {
     let whole = run(&host, &["get", "glm", "--json"]);
     assert_eq!(
         whole.json(),
-        json!({ "service": "glm", "account": "default", "kind": "profile", "description": "Claude Code to GLM",
+        json!({ "service": "glm", "account": "default", "kind": "profile", "description": "Claude Code to GLM", "meta": null,
                 "fields": { "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic?a=b",
                             "ANTHROPIC_AUTH_TOKEN": "tok'en $HOME", "ANTHROPIC_MODEL": "glm-4.6" } })
     );
@@ -325,7 +325,7 @@ fn a_single_value_is_got_bare_and_never_exported() {
     assert_eq!((get.code, get.stdout.as_str()), (0, "cf-token"));
     assert_eq!(
         run(&host, &["get", "cloudflare", "--json"]).json(),
-        json!({ "service": "cloudflare", "account": "default", "kind": "static", "description": null, "value": "cf-token" })
+        json!({ "service": "cloudflare", "account": "default", "kind": "static", "description": null, "meta": null, "value": "cf-token" })
     );
     assert_eq!(
         run(&host, &["list"]).json()["secrets"][0]["fields"],
@@ -613,7 +613,7 @@ fn a_secret_titled_with_a_slash_is_found_by_every_command_and_put_retitles_it_in
     assert_eq!(
         run(&host, &["list"]).json(),
         json!({ "secrets": [{ "service": "bark", "account": "default", "kind": "static",
-                              "description": "phone push", "fields": ["URL"] }] })
+                              "description": "phone push", "meta": null, "fields": ["URL"] }] })
     );
     let items = || host.state()["op"]["items"].clone();
     assert_eq!(
@@ -638,7 +638,7 @@ fn a_secret_titled_with_a_slash_is_found_by_every_command_and_put_retitles_it_in
     assert_eq!(
         run(&host, &["get", "bark", "--json"]).json(),
         json!({ "service": "bark", "account": "default", "kind": "static",
-                "description": "phone push", "fields": { "URL": "https://push/x" } })
+                "description": "phone push", "meta": null, "fields": { "URL": "https://push/x" } })
     );
     let meta: Vec<(String, String)> = items()[0]["fields"]
         .as_array()
@@ -807,4 +807,126 @@ fn a_bad_command_line_of_get_keeps_stdout_empty() {
     let put = run(&host, &["put", "x", "--nope"]);
     assert_eq!((put.code, put.stderr.as_str()), (2, ""));
     assert_eq!(put.json()["error"][0]["fix"], "run `optokens --help`");
+}
+
+/// Meta is one JSON object in the section `optokens`, stored compact: `put
+/// --meta` sets it, a later `put` without it keeps it, `get --json` and
+/// `list` show it, `get` and `env` never; anything but an object is refused.
+#[test]
+fn meta_is_one_json_object_put_keeps_and_get_json_and_list_show() {
+    let host = host();
+    let put = run(
+        &host,
+        &[
+            "put",
+            "cloudflare",
+            "--kind",
+            "profile",
+            "--meta",
+            r#"{ "account_id": "acc1", "zone": { "id": 7 } }"#,
+            "--set",
+            "CF_API_TOKEN=t",
+        ],
+    );
+    assert_eq!((put.code, put.stderr.as_str()), (0, ""));
+    let item = &host.state()["op"]["items"][0];
+    let stored: Vec<&Value> = item["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["label"] == "meta")
+        .collect();
+    assert_eq!(stored.len(), 1, "{item}");
+    assert_eq!(stored[0]["section"]["id"], "optokens");
+    assert_eq!(
+        stored[0]["value"], r#"{"account_id":"acc1","zone":{"id":7}}"#,
+        "compact JSON"
+    );
+    let meta = json!({ "account_id": "acc1", "zone": { "id": 7 } });
+
+    // A later put without --meta keeps it.
+    assert_eq!(
+        run(&host, &["put", "cloudflare", "--set", "CF_ZONE=z"]).code,
+        0
+    );
+    assert_eq!(
+        run(&host, &["list"]).json()["secrets"][0]["meta"],
+        meta,
+        "kept by a put without --meta"
+    );
+    let whole = run(&host, &["get", "cloudflare", "--json"]).json();
+    assert_eq!(whole["meta"], meta);
+    let got = run(&host, &["get", "cloudflare", "--field", "CF_ZONE"]);
+    assert_eq!(got.stdout, "z");
+    let env = run(&host, &["env", "cloudflare"]);
+    assert_eq!(env.stdout, "export CF_API_TOKEN='t'\nexport CF_ZONE='z'\n");
+
+    // A --meta alone for a stored Secret replaces it and changes nothing else.
+    let alone = run(&host, &["put", "cloudflare", "--meta", r#"{"x":1}"#]);
+    assert_eq!(alone.json()["changed"], true);
+    assert_eq!(
+        run(&host, &["list"]).json()["secrets"][0]["meta"],
+        json!({ "x": 1 })
+    );
+    assert_eq!(
+        run(&host, &["put", "cloudflare", "--meta", r#"{"x": 1}"#]).json()["changed"],
+        false
+    );
+
+    // Anything but a JSON object is refused before the vault.
+    let calls = host.calls().as_array().unwrap().len();
+    for bad in ["not-json", "[1]", "\"s\"", "null", "{"] {
+        let refused = run(&host, &["put", "cloudflare", "--meta", bad]);
+        assert_eq!(
+            (refused.code, kinds(&refused.json())),
+            (2, vec!["bad_meta"]),
+            "{bad}"
+        );
+        assert!(
+            refused.json()["error"][0]["fix"]
+                .as_str()
+                .unwrap()
+                .contains("--meta '{"),
+            "{}",
+            refused.stdout
+        );
+    }
+    assert_eq!(host.calls().as_array().unwrap().len(), calls);
+}
+
+/// An item written before Meta, with no `meta` field, is a Secret with no
+/// Meta; one whose `meta` is no JSON object is not optokens' layout.
+#[test]
+fn an_item_without_meta_has_none_and_a_bad_meta_is_refused_by_name() {
+    let item = |meta: Option<&str>| {
+        let mut fields = vec![
+            field("fields", "value", "cf-token"),
+            field("optokens", "service", "cloudflare"),
+            field("optokens", "account", "default"),
+            field("optokens", "kind", "static"),
+            field("optokens", "shape", "value"),
+        ];
+        fields.extend(meta.map(|m| field("optokens", "meta", m)));
+        stored("x1", "cloudflare", json!(["optokens"]), json!(fields))
+    };
+    let host = seeded(json!([item(None)]));
+    assert_eq!(
+        run(&host, &["list"]).json()["secrets"][0]["meta"],
+        Value::Null
+    );
+    assert_eq!(
+        run(&host, &["get", "cloudflare", "--json"]).json()["meta"],
+        Value::Null
+    );
+    let bad = seeded(json!([item(Some("[1]"))]));
+    let refused = run(&bad, &["list"]);
+    assert_eq!(kinds(&refused.json()), ["not_optokens"]);
+    assert!(
+        refused.json()["error"][0]["fault"]
+            .as_str()
+            .unwrap()
+            .ends_with("its `meta` is not a JSON object"),
+        "{}",
+        refused.stdout
+    );
 }

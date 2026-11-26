@@ -16,6 +16,10 @@ _Avoid_: sub-secret, key/value pair.
 An agent-written note of what a Secret is for, set when it is first `put` and shown by `list`: its reader is a later agent recalling the Secret's purpose.
 _Avoid_: comment, label.
 
+**Meta**:
+Structured data about a Secret for a program to read (a Cloudflare `account_id`, an API's endpoint), one JSON object, set by `put --meta` and shown by `list` and `get --json`. Distinct from the Description, prose for a later agent.
+_Avoid_: metadata (optokens' own fields of an item: its kind, shape, name), notes.
+
 **Service**:
 The API or tool a Secret authenticates to, or a Profile points a tool at, named by a stable slug (`cloudflare`, `github`); the slug is how a Secret is looked up.
 

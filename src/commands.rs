@@ -28,6 +28,9 @@ pub struct PutArgs {
     /// What the Secret is for, for a later agent that reads `list`.
     #[arg(long, verbatim_doc_comment)]
     description: Option<String>,
+    /// Structured data about the Secret for a program to read, one JSON object such as `{"account_id":"..."}`: it replaces the stored Meta.
+    #[arg(long, value_name = "JSON", verbatim_doc_comment)]
+    meta: Option<String>,
     /// `NAME=value`: a Field that is not secret, stored as plain text; repeat it for several.
     #[arg(long, value_name = "NAME=value", verbatim_doc_comment)]
     set: Vec<String>,
@@ -80,6 +83,14 @@ fn put_secret(
             Err(refusal) => faults.push(refusal),
         }
     }
+    let meta = match args.meta.as_deref().map(secret::parse_meta) {
+        Some(Ok(meta)) => Some(meta),
+        Some(Err(refusal)) => {
+            faults.push(refusal);
+            None
+        }
+        None => None,
+    };
     let asked = args.fields.as_deref().map(labels).unwrap_or_default();
     let shown = args.show.as_deref().map(labels).unwrap_or_default();
     let unasked: Vec<&String> = shown.iter().filter(|l| !asked.contains(l)).collect();
@@ -113,14 +124,15 @@ fn put_secret(
         }
     }
     // A bare `put` names no Field: its one value is entered on the link,
-    // unless it is a `--description` alone for a stored Secret.
+    // unless it is a `--description` or `--meta` alone for a stored Secret.
+    let annotated = args.description.is_some() || args.meta.is_some();
     let bare = args.set.is_empty()
         && args.field_from_stdin.is_none()
         && args.field_from_pipe.is_empty()
         && asked.is_empty();
     let path = std::env::var_os("PATH");
     let mut endpoint = None;
-    if !asked.is_empty() || (bare && args.description.is_none()) {
+    if !asked.is_empty() || (bare && !annotated) {
         match Endpoint::open(path.as_deref()) {
             Ok(opened) => endpoint = Some(opened),
             Err(refusal) => faults.push(refusal),
@@ -132,13 +144,14 @@ fn put_secret(
     let store = Store::open(env)?;
     let found = store.find(&name).map_err(|r| vec![r])?;
     let existing = found.as_ref().map(|f| &f.secret);
-    let single = bare && (args.description.is_none() || existing.is_none());
+    let single = bare && (!annotated || existing.is_none());
     if single && endpoint.is_none() {
         endpoint = Some(Endpoint::open(path.as_deref()).map_err(|r| vec![r])?);
     }
     let mut put = Put {
         kind: args.kind,
         description: args.description,
+        meta,
         fields,
         value: single.then(String::new),
     };

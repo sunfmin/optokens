@@ -3,7 +3,7 @@
 //! passes in what it read.
 
 use crate::refusal::Refusal;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 /// The account a Secret is under when `--account` is not given.
 pub const DEFAULT_ACCOUNT: &str = "default";
@@ -23,6 +23,8 @@ pub enum Fault {
     KindChange,
     /// `put` would turn a single value into labelled Fields, or labelled Fields into a single value (a bare `put`), which it never does. Fix: `optokens rm` the Secret, then `put` it again in its new shape.
     ShapeChange,
+    /// `--meta` is not one JSON object. Fix: give it as one, such as `--meta '{"account_id":"..."}'`.
+    BadMeta,
     /// `--show` names a label `--fields` does not, or is given without `--fields`. Fix: name each `--show` label in `--fields` too.
     BadShow,
     /// No value was submitted on the one-time link before it expired, so nothing was stored. Fix: run the same `put` or `init` again, and open its new link sooner.
@@ -117,6 +119,7 @@ pub enum Visibility {
 pub struct Secret {
     pub kind: Kind,
     pub description: Option<String>,
+    pub meta: Option<Meta>,
     pub values: Values,
 }
 
@@ -199,7 +202,26 @@ impl std::fmt::Display for Name {
     }
 }
 
-/// What one `put` names: the kind and description it gives, and its Fields'
+/// Structured data about a Secret, for a program to read (a Cloudflare
+/// `account_id`): one JSON object, apart from its Description.
+pub type Meta = Map<String, Value>;
+
+/// `--meta`: one JSON object, else refused.
+pub fn parse_meta(raw: &str) -> Result<Meta, Refusal> {
+    match serde_json::from_str(raw) {
+        Ok(Value::Object(meta)) => Ok(meta),
+        read => Err(Refusal::of(
+            &Fault::BadMeta,
+            match read {
+                Ok(_) => format!("`--meta` is `{raw}`, which is JSON but not one object"),
+                Err(e) => format!("`--meta` is `{raw}`, which is not JSON: {e}"),
+            },
+            r#"give it as one JSON object, such as `--meta '{"account_id":"..."}'`"#,
+        )),
+    }
+}
+
+/// What one `put` names: the kind, description and Meta it gives, and its Fields'
 /// values in order (each `--set`, then `--field-from-stdin`, then each
 /// `--field-from-pipe`, then `--fields`),
 /// or the single value of a bare `put`.
@@ -207,6 +229,7 @@ impl std::fmt::Display for Name {
 pub struct Put {
     pub kind: Option<Kind>,
     pub description: Option<String>,
+    pub meta: Option<Meta>,
     pub fields: Vec<Field>,
     /// A bare `put`'s one value, with no label.
     pub value: Option<String>,
@@ -431,6 +454,10 @@ pub fn merge(name: &Name, existing: Option<&Secret>, put: &Put) -> Result<Secret
             .description
             .clone()
             .or_else(|| existing.and_then(|e| e.description.clone())),
+        meta: put
+            .meta
+            .clone()
+            .or_else(|| existing.and_then(|e| e.meta.clone())),
         values,
     })
 }
@@ -513,6 +540,7 @@ fn head(name: &Name, secret: &Secret) -> Value {
         "account": name.account(),
         "kind": secret.kind.name(),
         "description": secret.description,
+        "meta": secret.meta,
     })
 }
 
@@ -595,6 +623,7 @@ mod tests {
         Put {
             kind,
             description: None,
+            meta: None,
             fields: concealed(pairs),
             value: None,
         }
@@ -609,6 +638,7 @@ mod tests {
         let stored = Secret {
             kind: Kind::Profile,
             description: Some("Claude Code to GLM".into()),
+            meta: None,
             values: fields(&[
                 ("ANTHROPIC_BASE_URL", "https://a"),
                 ("ANTHROPIC_MODEL", "glm-4.6"),
@@ -628,6 +658,7 @@ mod tests {
             Secret {
                 kind: Kind::Profile,
                 description: Some("Claude Code to GLM".into()),
+                meta: None,
                 values: fields(&[
                     ("ANTHROPIC_BASE_URL", "https://a"),
                     ("ANTHROPIC_MODEL", "glm-5"),
@@ -644,6 +675,7 @@ mod tests {
         assert_eq!(made.description, None);
         let described = Put {
             description: Some("d".into()),
+            meta: None,
             ..put(Some(Kind::Profile), &[("A", "1")])
         };
         assert_eq!(
@@ -653,6 +685,7 @@ mod tests {
         let profile = Secret {
             kind: Kind::Profile,
             description: None,
+            meta: None,
             values: fields(&[("A", "1")]),
         };
         let same = merge(
@@ -672,16 +705,19 @@ mod tests {
         let stored = Secret {
             kind: Kind::Static,
             description: None,
+            meta: None,
             values: Values::Single("v".into()),
         };
         let described = Put {
             description: Some("new".into()),
+            meta: None,
             ..Put::default()
         };
         assert_eq!(
             merge(&name(), Some(&stored), &described).unwrap(),
             Secret {
                 description: Some("new".into()),
+                meta: None,
                 ..stored.clone()
             }
         );
@@ -689,6 +725,49 @@ mod tests {
             merge(&name(), Some(&stored), &Put::default()).unwrap(),
             stored,
             "a put of nothing changes nothing"
+        );
+    }
+
+    #[test]
+    fn meta_is_one_json_object_a_put_replaces_or_keeps() {
+        let meta = |j: Value| j.as_object().cloned();
+        assert_eq!(
+            parse_meta(r#"{"account_id":"a"}"#).ok(),
+            meta(json!({ "account_id": "a" }))
+        );
+        for bad in ["", "x", "[1]", "null", "1", "{"] {
+            let refused = parse_meta(bad).unwrap_err();
+            assert_eq!(refused.kind, Some("bad_meta"), "{bad}");
+            assert!(
+                refused
+                    .fault
+                    .starts_with(&format!("`--meta` is `{bad}`, which is"))
+            );
+        }
+        assert!(
+            parse_meta("[1]")
+                .unwrap_err()
+                .fault
+                .ends_with("JSON but not one object")
+        );
+        let stored = Secret {
+            kind: Kind::Static,
+            description: None,
+            meta: meta(json!({ "a": 1 })),
+            values: Values::Single("v".into()),
+        };
+        assert_eq!(
+            merge(&name(), Some(&stored), &Put::default()).unwrap(),
+            stored,
+            "a put without --meta keeps it"
+        );
+        let replaced = Put {
+            meta: meta(json!({ "b": 2 })),
+            ..Put::default()
+        };
+        assert_eq!(
+            merge(&name(), Some(&stored), &replaced).unwrap().meta,
+            meta(json!({ "b": 2 }))
         );
     }
 
@@ -706,6 +785,7 @@ mod tests {
         let aws = Secret {
             kind: Kind::Static,
             description: None,
+            meta: None,
             values: fields(&[("A", "1")]),
         };
         let faults = merge(&Name::new("aws", "ci").unwrap(), Some(&aws), &bare("v")).unwrap_err();
@@ -731,6 +811,7 @@ mod tests {
         let stored = Secret {
             kind: Kind::Static,
             description: None,
+            meta: None,
             values: Values::Single("v".into()),
         };
         let faults = merge(
@@ -764,6 +845,7 @@ mod tests {
         let single = Secret {
             kind: Kind::Static,
             description: None,
+            meta: None,
             values: Values::Single("v".into()),
         };
         let faults = merge(
@@ -866,6 +948,7 @@ mod tests {
         let single = Secret {
             kind: Kind::Static,
             description: None,
+            meta: None,
             values: Values::Single("v".into()),
         };
         assert_eq!(value(&name(), &single, None).unwrap(), "v");
@@ -876,6 +959,7 @@ mod tests {
         let aws = Secret {
             kind: Kind::Static,
             description: None,
+            meta: None,
             values: fields(&[("Access Key ID", "id"), ("Secret", "s")]),
         };
         let aws_name = Name::new("aws", "ci").unwrap();
@@ -897,6 +981,7 @@ mod tests {
         let profile = Secret {
             kind: Kind::Profile,
             description: None,
+            meta: None,
             values: fields(&[("A", "it's $HOME"), ("B", "")]),
         };
         assert_eq!(
@@ -906,12 +991,14 @@ mod tests {
         let aws = Secret {
             kind: Kind::Static,
             description: None,
+            meta: None,
             values: fields(&[("Access Key ID", "x")]),
         };
         assert_eq!(exports(&name(), &aws).unwrap_err().kind, Some("not_env"));
         let single = Secret {
             kind: Kind::Static,
             description: None,
+            meta: None,
             values: Values::Single("v".into()),
         };
         assert_eq!(
@@ -921,26 +1008,29 @@ mod tests {
     }
 
     #[test]
-    fn get_json_and_list_show_kind_and_description_and_list_no_value() {
+    fn get_json_and_list_show_kind_description_and_meta_and_list_no_value() {
         let s = Secret {
             kind: Kind::Profile,
             description: Some("d".into()),
+            meta: json!({ "m": 1 }).as_object().cloned(),
             values: fields(&[("B", "2"), ("A", "1")]),
         };
         assert_eq!(
             to_json(&name(), &s),
-            json!({ "service": "glm", "account": "default", "kind": "profile", "description": "d", "fields": { "A": "1", "B": "2" } })
+            json!({ "service": "glm", "account": "default", "kind": "profile", "description": "d", "meta": { "m": 1 }, "fields": { "A": "1", "B": "2" } })
         );
         assert_eq!(
             summary(&name(), &s),
-            json!({ "service": "glm", "account": "default", "kind": "profile", "description": "d", "fields": ["B", "A"] })
+            json!({ "service": "glm", "account": "default", "kind": "profile", "description": "d", "meta": { "m": 1 }, "fields": ["B", "A"] })
         );
         let single = Secret {
             kind: Kind::Static,
             description: None,
+            meta: None,
             values: Values::Single("v".into()),
         };
         assert_eq!(to_json(&name(), &single)["value"], "v");
+        assert_eq!(summary(&name(), &single)["meta"], Value::Null);
         assert_eq!(summary(&name(), &single)["fields"], Value::Null);
     }
 
@@ -976,7 +1066,7 @@ mod tests {
                 out
             };
             let (stored, named) = (dedup(stored), dedup(named));
-            let existing = (!stored.is_empty()).then(|| Secret { kind: Kind::Static, description: None, values: Values::Fields(stored.clone()) });
+            let existing = (!stored.is_empty()).then(|| Secret { kind: Kind::Static, description: None, meta: None, values: Values::Fields(stored.clone()) });
             let merged = merge(&name(), existing.as_ref(), &Put { fields: named.clone(), ..Put::default() }).unwrap();
             let Values::Fields(merged) = merged.values else { panic!("fields") };
             for f in &named { prop_assert!(merged.contains(f)); }
