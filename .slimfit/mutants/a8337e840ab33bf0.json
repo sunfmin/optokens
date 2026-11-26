@@ -1,0 +1,47 @@
+{
+  "tree": "d1216d6ad112f2ecc07a35faa1ab186c1d44195a+d1fba762150c532c",
+  "picker": "codex:01a216dc-ab5c-7b03-832e-6128f89f9310:default",
+  "author": "claude-code:d6e07bf3-4d0f-583a-87c6-7e39c31cdb15:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/access.rs:145:9: replace windows::entries -> Result<Option<Vec<Entry>>, String> with Ok(Some(vec![]))",
+        "why": "The tests pass synthetic entries directly to judge, so they may miss the Windows reader returning an empty list for every file.",
+        "outcome": "survived",
+        "first_outcome": "survived"
+      },
+      {
+        "name": "src/access.rs:172:53: replace == with != in windows::entries",
+        "why": "No test calls GetAce on Windows, so reversing its success check may survive.",
+        "outcome": "survived",
+        "first_outcome": "survived"
+      },
+      {
+        "name": "src/access.rs:188:57: replace != with == in windows::entries",
+        "why": "The tests supply the owner flag directly, leaving the Windows owner SID comparison untested.",
+        "outcome": "survived",
+        "first_outcome": "survived"
+      },
+      {
+        "name": "src/access.rs:201:9: replace windows::sid_string -> String with String::new()",
+        "why": "The tests supply preformatted SIDs, so they may miss a refusal that omits the offending SID and its removal command.",
+        "outcome": "survived",
+        "first_outcome": "survived"
+      },
+      {
+        "name": "src/access.rs:138:13: replace windows::<impl Drop for Descriptor>::drop with ()",
+        "why": "The tests never allocate a Windows security descriptor, so they cannot detect its cleanup being skipped.",
+        "outcome": "survived",
+        "first_outcome": "survived"
+      }
+    ]
+  },
+  "removed_tests": {
+    "rust": [
+      "src/main.rs:35: help_is_the_manual",
+      "src/main.rs:48: version_names_the_crate_version",
+      "tests/binary.rs:13: help_goes_to_stdout_and_exits_zero",
+      "tests/binary.rs:21: a_refusal_goes_to_stderr_and_exits_two"
+    ]
+  }
+}

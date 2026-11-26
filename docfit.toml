@@ -2,3 +2,6 @@
 [documents]
 "CLAUDE.md" = "agent"
 "README.md" = "readme"
+"GLOSSARY.md" = "glossary"
+"docs/adr/*.md" = "adr"
+"skills/*/SKILL.md" = "skill"

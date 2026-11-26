@@ -1,32 +1,29 @@
 {
   "suites": {
     "rust": {
-      "prod_lines": 23,
-      "test_lines": 43,
-      "tests": 5,
+      "prod_lines": 770,
+      "test_lines": 637,
+      "tests": 24,
       "failures": 0,
       "test_seconds": 0.007,
-      "covered_lines": 18,
+      "covered_lines": 398,
       "uncovered_lines": 0
     }
   },
-  "loosened": [],
-  "kept": [],
-  "kept_spans": [
+  "loosened": [
     {
       "suite": "rust",
-      "file": "src/main.rs",
-      "start": 19,
-      "end": 27,
-      "function": "main",
-      "hash": "6cb546c7efab2a2b",
-      "reason": "the binary's main: it only reads the process args, writes answer()'s text to stdout or stderr and exits with its code; what it decides shows only in a real process, so a fast in-process test could run it but not assert it; answer() carries every decision and is tested"
+      "metric": "survived_mutants",
+      "from": 0.0,
+      "to": 5.0,
+      "reason": "optokens#1: the five picks are in the Windows-only Win32 reader of src/access.rs (cfg(windows)), compiled for x86_64-pc-windows-msvc but run by no test, as no host here runs Windows; debt for a Windows test run, which ratchets this away (ADR 0004)"
     }
   ],
+  "kept": [],
   "measured": {
     "rust": {
-      "uncovered_lines": 0,
-      "test_seconds": 0.02
+      "uncovered_lines": 12,
+      "test_seconds": 0.21
     }
   }
 }

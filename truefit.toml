@@ -2,3 +2,66 @@
 # Promises are decisions, so they live in ADRs; CLAUDE.md holds the repo's invariants.
 [promises]
 sources = ["CLAUDE.md", "docs/adr/*.md"]
+
+# The promises the ADRs make. One a command not built yet will keep is kept
+# until a date by which that command is due; its test is its check then.
+
+[[promise]]
+name = "one-json-object"
+says = "Every command prints one JSON object on stdout; a failure is `{\"error\": …}` with a non-zero exit."
+source = "docs/adr/0001-one-json-object-but-get-and-env.md:5"
+check = ["test"]
+
+[[promise]]
+name = "get-and-env-errors-on-stderr"
+says = "They send their errors to stderr and leave stdout empty on an error, so `$(…)` and `eval` never capture an error."
+source = "docs/adr/0001-one-json-object-but-get-and-env.md:5"
+kept = "get and env are not built yet; their tests check it"
+kept_until = "2027-02-28"
+
+[[promise]]
+name = "values-over-op-pipes"
+says = "A Secret's values go in and out only over `op`'s stdin and stdout (JSON item templates), and the service account's token goes only in the child's environment."
+source = "docs/adr/0002-reach-1password-through-op.md:5"
+kept = "no command hands op a value or the token yet; doctor's test checks it gives no program the token"
+kept_until = "2027-02-28"
+
+[[promise]]
+name = "no-value-in-argv-or-temp-file"
+says = "A secret value is never in any process's command line and never in a temporary file."
+source = "docs/adr/0002-reach-1password-through-op.md:5"
+kept = "no command handles a secret value yet; the first that does carries its test against the op stand-in's recorded calls"
+kept_until = "2027-02-28"
+
+[[promise]]
+name = "one-token-lookup"
+says = "The token is `OP_SERVICE_ACCOUNT_TOKEN` when set, else `$XDG_CONFIG_HOME/optokens/token` (default `~/.config/optokens/token`). One function finds it, and every command calls it."
+source = "docs/adr/0003-token-env-then-owner-only-file.md:5"
+check = ["test"]
+
+[[promise]]
+name = "windows-token-dacl"
+says = "Any other entry is refused, naming it and the `icacls` line that strips it (or `optokens init`, which writes the file with that DACL). Only the check differs by OS, behind one function."
+source = "docs/adr/0003-token-env-then-owner-only-file.md:7"
+kept = "there is no Windows host to run a test on; the gate only builds the Windows branch"
+kept_until = "2027-05-31"
+
+[[promise]]
+name = "five-platforms"
+says = "optokens is built for agent-cli's five platforms: macOS arm64 and x86_64, Linux arm64 and x86_64 (musl), and Windows x86_64 (msvc). There is no Windows host to run the tests on, so the gate checks the Windows build with clippy for `x86_64-pc-windows-msvc`, and a Windows-only branch cannot rot unbuilt."
+source = "docs/adr/0004-five-platforms.md:5"
+check = ["test"]
+
+[[promise]]
+name = "env-posix-exports"
+says = "`env` prints `export NAME='value'` lines on every OS, for sh, bash and zsh, Git Bash and WSL on Windows included, as mytokens prints them (ADR 0001). There is no PowerShell form yet: `env --shell powershell` is added when someone needs it."
+source = "docs/adr/0005-env-prints-posix-exports.md:3"
+kept = "env is not built yet; its test checks it"
+kept_until = "2027-02-28"
+
+[[promise]]
+name = "a-person-enters-on-a-link"
+says = "`put --fields` and `init` print a one-time link and wait for its one submission, departing from agent-cli's \"never ask\": the owner's spec makes the link the way in for a secret a person knows, and there is no popup or terminal prompt to fall back on."
+source = "docs/adr/0007-a-person-enters-a-value-on-a-one-time-link.md:5"
+kept = "put and init are not built yet; their tests check it"
+kept_until = "2027-02-28"

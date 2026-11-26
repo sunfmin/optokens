@@ -1,0 +1,10 @@
+{
+  "tree": "d1216d6ad112f2ecc07a35faa1ab186c1d44195a+d1fba762150c532c",
+  "lines": 747,
+  "serves": "optokens#1",
+  "considered": "docfit build.rs and src/version.rs copied rather than shared; mytokens token lookup and doctor read but not reusable (Go, Keychain); the Windows DACL reader weighed against skipping the check (ADR 0004 keeps it)",
+  "reviewer": "codex:01a216d4-3136-7991-a376-58b23a039d6f:default",
+  "author": "claude-code:d6e07bf3-4d0f-583a-87c6-7e39c31cdb15:opus",
+  "cut": "In src/access.rs, read AceCount from the ACL returned by GetSecurityInfo and remove the GetAclInformation call and its buffer. In src/program.rs and src/doctor.rs, retain ExitStatus in Ran and use its success() and code() methods to remove Ran::ok. In src/doctor.rs, build each found object once by serializing an optional version or address after recording any refusal. In src/cli.rs, have refused take one Refusal and serialize it as a one-element array, removing the singleton Vec allocations at both call sites.",
+  "answer": "made all four cuts (commit after 839de67): AceCount read from the ACL header, Ran keeps ExitStatus, doctor builds op and address objects once, refused takes one Refusal; the change still adds 747 lines, which the issue (doctor, token lookup, Windows DACL, help, version) needs"
+}
