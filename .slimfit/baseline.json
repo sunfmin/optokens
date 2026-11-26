@@ -12,6 +12,17 @@
   },
   "loosened": [],
   "kept": [],
+  "kept_spans": [
+    {
+      "suite": "rust",
+      "file": "src/main.rs",
+      "start": 19,
+      "end": 27,
+      "function": "main",
+      "hash": "6cb546c7efab2a2b",
+      "reason": "the binary's main: it only reads the process args, writes answer()'s text to stdout or stderr and exits with its code; what it decides shows only in a real process, so a fast in-process test could run it but not assert it; answer() carries every decision and is tested"
+    }
+  ],
   "measured": {
     "rust": {
       "uncovered_lines": 7,
