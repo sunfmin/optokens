@@ -8,7 +8,7 @@
 //! that is not this shape is refused by name, never guessed at.
 
 use crate::refusal::Refusal;
-use crate::secret::Visibility::{self, Concealed, Plain};
+use crate::secret::Visibility::{Concealed, Plain};
 use crate::secret::{Fault, Field, Kind, Name, Secret, Values};
 use serde_json::{Map, Value, json};
 
@@ -33,19 +33,23 @@ pub const SINGLE: &str = "value";
 pub const CONCEALED: &str = "CONCEALED";
 pub const STRING: &str = "STRING";
 
-fn field_type(visibility: Visibility) -> &'static str {
-    match visibility {
-        Concealed => CONCEALED,
-        Plain => STRING,
-    }
-}
-
 /// The item template that `op item create` and `op item edit` read on stdin.
 pub fn template(name: &Name, secret: &Secret) -> Value {
-    let field = |section: &str, id: String, kind: &str, label: &str, value: &str| json!({ "id": id, "section": { "id": section }, "type": kind, "label": label, "value": value });
+    let field = |section: &str, id: String, visibility, label: &str, value: &str| {
+        let kind = if visibility == Plain {
+            STRING
+        } else {
+            CONCEALED
+        };
+        json!({ "id": id, "section": { "id": section }, "type": kind, "label": label, "value": value })
+    };
+    let single;
     let (shape, values) = match &secret.values {
-        Values::Single(value) => (SHAPE_SINGLE, vec![Field::new(SINGLE, value, Concealed)]),
-        Values::Fields(fields) => (SHAPE_FIELDS, fields.clone()),
+        Values::Single(value) => {
+            single = [Field::new(SINGLE, value, Concealed)];
+            (SHAPE_SINGLE, &single[..])
+        }
+        Values::Fields(fields) => (SHAPE_FIELDS, &fields[..]),
     };
     let mut fields: Vec<Value> = values
         .iter()
@@ -54,7 +58,7 @@ pub fn template(name: &Name, secret: &Secret) -> Value {
             field(
                 VALUES,
                 format!("{VALUES}.{i}"),
-                field_type(f.visibility),
+                f.visibility,
                 &f.label,
                 &f.value,
             )
@@ -68,7 +72,7 @@ pub fn template(name: &Name, secret: &Secret) -> Value {
     fields.extend(
         meta.into_iter()
             .flatten()
-            .map(|(l, v)| field(META, format!("{META}.{l}"), STRING, l, v)),
+            .map(|(l, v)| field(META, format!("{META}.{l}"), Plain, l, v)),
     );
     json!({
         "title": name.title(),

@@ -564,42 +564,6 @@ mod tests {
     }
 
     #[test]
-    fn put_sets_a_named_fields_visibility_and_keeps_an_unnamed_ones() {
-        use Visibility::{Concealed, Plain};
-        let stored = Secret {
-            kind: Kind::Static,
-            description: None,
-            values: Values::Fields(vec![
-                Field::new("URL", "https://a", Plain),
-                Field::new("TOKEN", "t", Concealed),
-                Field::new("USER", "u", Plain),
-                Field::new("KEY", "k", Concealed),
-            ]),
-        };
-        let put = Put {
-            fields: vec![
-                Field::new("URL", "https://a", Concealed),
-                Field::new("TOKEN", "t", Plain),
-            ],
-            ..Put::default()
-        };
-        assert_eq!(
-            merge(&name(), Some(&stored), &put).unwrap().values,
-            Values::Fields(vec![
-                Field::new("URL", "https://a", Concealed),
-                Field::new("TOKEN", "t", Plain),
-                Field::new("USER", "u", Plain),
-                Field::new("KEY", "k", Concealed),
-            ])
-        );
-        let unchanged = Put {
-            fields: vec![Field::new("USER", "u", Plain)],
-            ..Put::default()
-        };
-        assert_eq!(merge(&name(), Some(&stored), &unchanged).unwrap(), stored);
-    }
-
-    #[test]
     fn a_new_secret_is_static_unless_put_says_profile() {
         let made = merge(&name(), None, &put(None, &[("Token", "t")])).unwrap();
         assert_eq!(made.kind, Kind::Static);

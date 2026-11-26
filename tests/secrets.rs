@@ -202,8 +202,8 @@ fn put_list_get_env_rm_a_profile() {
     );
 }
 
-/// A Field's type follows the way this put set it; one it does not name keeps
-/// its own, and an item of all concealed values reads back as it was.
+/// A Field's type follows the way this put set it, both ways; one it does not
+/// name keeps its own, and a stored item reads back as it was.
 #[test]
 fn a_fields_type_follows_how_its_value_came_in() {
     let concealed = |label: &str, value: &str| {
@@ -218,7 +218,7 @@ fn a_fields_type_follows_how_its_value_came_in() {
         json!([
             concealed("URL", "https://a"),
             concealed("TOKEN", "t"),
-            concealed("USER", "u"),
+            field("fields", "USER", "u"),
             field("optokens", "kind", "static"),
             field("optokens", "shape", "fields")
         ])
@@ -235,7 +235,7 @@ fn a_fields_type_follows_how_its_value_came_in() {
     );
     assert_eq!(
         types(),
-        json!({ "URL": "STRING", "TOKEN": "CONCEALED", "USER": "CONCEALED" })
+        json!({ "URL": "STRING", "TOKEN": "CONCEALED", "USER": "STRING" })
     );
     assert_eq!(
         run(&host, &["put", "app", "--set", "URL=https://a"]).json()["changed"],
@@ -250,7 +250,7 @@ fn a_fields_type_follows_how_its_value_came_in() {
     assert_eq!(piped_in.json()["changed"], true);
     assert_eq!(
         types(),
-        json!({ "URL": "CONCEALED", "TOKEN": "CONCEALED", "USER": "CONCEALED" })
+        json!({ "URL": "CONCEALED", "TOKEN": "CONCEALED", "USER": "STRING" })
     );
     assert_eq!(
         run(&host, &["get", "app", "--json"]).json()["fields"],

@@ -63,13 +63,12 @@ run() {
     out=$("$bin" "$@") || { rc=$?; printf '%s\n' "$out"; fail "optokens $* exited $rc"; }
 }
 mask() { jq -c '(.fields.TOKEN? // empty) |= "***"'; }
-# The vault's item, its field types checked: --set plain, stdin concealed.
+# The field types of the vault's item ($item): --set plain, stdin concealed.
 types() { # <when>
-    item=$(op item get "$title" --vault "$vault" --format json)
-    printf '%s' "$item" | jq -c '[.fields[] | select(.section) | {(.section.label + "." + .label): .type}] | add'
-    check "types $1: A STRING, TOKEN CONCEALED, metadata STRING" '
-      [.fields[] | select(.section) | {(.section.label + "." + .label): .type}] | add
-      == {"fields.A":"STRING","fields.TOKEN":"CONCEALED","optokens.kind":"STRING","optokens.shape":"STRING","optokens.description":"STRING"}' "$item"
+    map=$(printf '%s' "$item" | jq -c '[.fields[] | select(.section) | {(.section.label + "." + .label): .type}] | add')
+    echo "$map"
+    check "types $1: A STRING, TOKEN CONCEALED, metadata STRING" \
+        '. == {"fields.A":"STRING","fields.TOKEN":"CONCEALED","optokens.kind":"STRING","optokens.shape":"STRING","optokens.description":"STRING"}' "$map"
 }
 
 # ps sampled in a loop for as long as the put runs: the value must never show.
@@ -147,6 +146,7 @@ printf '%s' "$out" | mask
 printf '%s' "$out" | jq -e --arg v "$value" '.fields.A == "2" and .fields.TOKEN == $v' >/dev/null || fail "upsert lost TOKEN or did not set A"
 echo "ok: A is 2, TOKEN kept"
 say "op item get $title --vault $vault --format json  (types)"
+item=$(op item get "$title" --vault "$vault" --format json)
 types "after the upsert"
 run put "$service" --set "A=2"
 check "the same put again writes nothing" '.changed == false' "$out"
