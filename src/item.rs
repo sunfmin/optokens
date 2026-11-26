@@ -217,11 +217,11 @@ fn tagged(item: &Value) -> bool {
 
 /// The ids of the items among `op item list --format json`'s summaries that
 /// may hold `name`'s Secret: those titled [`Name::title`] or
-/// [`Name::old_title`]. Which one does is for [`read`] to say, as another
+/// its earlier title, `<service>/<account>`. Which one does is for [`read`] to say, as another
 /// Secret's title may be the same (`a.b` is `a.b/default` and `a/b`). An item
 /// of either title without the tag is refused.
 pub fn candidates(summaries: &Value, name: &Name) -> Result<Vec<String>, Refusal> {
-    let titles = [name.title(), name.old_title()];
+    let titles = [name.title(), name.to_string()];
     let mut ids = Vec::new();
     for item in summaries.as_array().into_iter().flatten() {
         if !titles.iter().any(|t| item["title"] == t.as_str()) {
@@ -425,7 +425,7 @@ mod tests {
     /// no name in its section.
     fn old(name: &Name, secret: &Secret) -> Value {
         let mut item = stored(&template(name, secret));
-        item["title"] = json!(name.old_title());
+        item["title"] = json!(name.to_string());
         item["fields"]
             .as_array_mut()
             .unwrap()

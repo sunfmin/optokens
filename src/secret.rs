@@ -167,11 +167,6 @@ impl Name {
         }
     }
 
-    /// The title an earlier optokens gave the item: `<service>/<account>`.
-    pub fn old_title(&self) -> String {
-        self.to_string()
-    }
-
     /// The name an earlier optokens' title holds, or `None` when it holds none.
     pub fn from_old_title(title: &str) -> Option<Name> {
         let (service, account) = title.split_once('/')?;
@@ -196,7 +191,8 @@ impl Name {
     }
 }
 
-/// How answers and refusals name a Secret: `<service>/<account>`.
+/// How answers and refusals name a Secret, and the title an earlier
+/// optokens gave its item: `<service>/<account>`.
 impl std::fmt::Display for Name {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}/{}", self.service, self.account)
@@ -855,7 +851,6 @@ mod tests {
             Name::new("name.com", "default").unwrap().title(),
             "name.com"
         );
-        assert_eq!(Name::new("a", "b").unwrap().old_title(), "a/b");
         assert_eq!(
             Name::from_old_title("a/b"),
             Some(Name::new("a", "b").unwrap())
