@@ -1,0 +1,4 @@
+# optokens' ties to the real thing (`truefit --help`). Its tasks are filed as issues while the host is idle (factorium.toml's [idle]).
+# Promises are decisions, so they live in ADRs; CLAUDE.md holds the repo's invariants.
+[promises]
+sources = ["CLAUDE.md", "docs/adr/*.md"]

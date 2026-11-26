@@ -1,0 +1,4 @@
+# This repo's documents, each under its kind (`docfit check --help`).
+[documents]
+"CLAUDE.md" = "agent"
+"README.md" = "readme"

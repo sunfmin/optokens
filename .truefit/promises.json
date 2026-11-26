@@ -1,0 +1,7 @@
+{
+  "4bb5ad4cd9a9": {
+    "mark": "not",
+    "sentence": "`optokens --help` is the manual and its only copy; keep it true whenever behaviour changes.",
+    "source": "CLAUDE.md:3"
+  }
+}

@@ -1,0 +1,5 @@
+# The one toolchain everything builds with, as the sibling Rust CLIs (docfit, stablehand, slimfit) pin it.
+[toolchain]
+channel = "nightly-2026-10-22"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

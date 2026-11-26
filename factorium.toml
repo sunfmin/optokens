@@ -1,0 +1,12 @@
+# How factorium gates this repo (factorium SPEC.md §5).
+[gate]
+fast = "./gate.sh"
+fast_limit = 300
+slow = "./gate.sh"
+slow_limit = 300
+regenerated = [".slimfit/baseline.json", ".docfit/baseline.json"]
+
+[idle]
+tasks = "slimfit --version && truefit --version && docfit --version && slimfit next --all --sample 5 && truefit next --all && docfit next --all"
+every = 86400
+limit = 1800
