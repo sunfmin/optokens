@@ -526,6 +526,21 @@ mod tests {
             merge(&name(), None, &described).unwrap().kind,
             Kind::Profile
         );
+        let profile = Secret {
+            kind: Kind::Profile,
+            description: None,
+            values: fields(&[("A", "1")]),
+        };
+        let same = merge(
+            &name(),
+            Some(&profile),
+            &put(Some(Kind::Profile), &[("B", "2")]),
+        );
+        assert_eq!(
+            same.unwrap().kind,
+            Kind::Profile,
+            "naming the stored kind is no change"
+        );
     }
 
     #[test]

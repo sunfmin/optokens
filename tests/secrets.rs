@@ -490,4 +490,10 @@ fn a_bad_command_line_of_get_keeps_stdout_empty() {
     let get = run(&host, &["get", "x", "--field", "A", "--json"]);
     assert_eq!((get.code, get.stdout.as_str()), (2, ""));
     assert_eq!(get.error()["error"][0]["fix"], "run `optokens --help`");
+    let env = run(&host, &["env"]);
+    assert_eq!((env.code, env.stdout.as_str()), (2, ""));
+    assert_eq!(env.error()["error"][0]["fix"], "run `optokens --help`");
+    let put = run(&host, &["put", "x", "--nope"]);
+    assert_eq!((put.code, put.stderr.as_str()), (2, ""));
+    assert_eq!(put.json()["error"][0]["fix"], "run `optokens --help`");
 }

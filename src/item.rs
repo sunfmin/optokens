@@ -314,6 +314,19 @@ mod tests {
             why(&|i| i["fields"][4]["value"] = json!("value"))
                 .ends_with("its section `fields` is not one field `value`")
         );
+        let single = Secret {
+            kind: Kind::Static,
+            description: None,
+            values: Values::Single("v".into()),
+        };
+        let mut renamed = stored(&template(&name, &single));
+        renamed["fields"][1]["label"] = json!("Token");
+        assert!(
+            read(&renamed)
+                .unwrap_err()
+                .fault
+                .ends_with("its section `fields` is not one field `value`")
+        );
         assert!(
             why(&|i| i["fields"][3]["label"] = json!("level"))
                 .ends_with("its section `optokens` has a field `level`")
