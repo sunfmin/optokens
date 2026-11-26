@@ -227,10 +227,10 @@ fn fields_over_plain_http_store_once_and_a_second_post_is_gone() {
             "--description",
             "CI database",
         ],
-        &[],
+        &[("USER", "ci-runner")],
     );
     assert!(
-        waiting.said.contains("optokens: plain HTTP on the tailnet, which WireGuard encrypts, because `tailscale cert` failed: it exited 1: Access denied: cert access denied. For HTTPS, an admin runs `sudo tailscale set --operator="),
+        waiting.said.contains("optokens: plain HTTP on the tailnet, which WireGuard encrypts, because `tailscale cert` failed: it exited 1: Access denied: cert access denied. For HTTPS, an admin runs `sudo tailscale set --operator=ci-runner` once"),
         "{}",
         waiting.said
     );

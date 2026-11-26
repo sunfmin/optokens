@@ -266,3 +266,108 @@ fn reason(status: u16) -> &'static str {
         _ => "",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    /// A connection that yields its bytes in the given reads, and keeps what is written.
+    struct Conn {
+        reads: VecDeque<Vec<u8>>,
+        written: Vec<u8>,
+    }
+
+    impl Conn {
+        fn new(reads: Vec<Vec<u8>>) -> Conn {
+            Conn {
+                reads: reads.into(),
+                written: Vec::new(),
+            }
+        }
+    }
+
+    impl Read for Conn {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let Some(mut next) = self.reads.pop_front() else {
+                return Ok(0);
+            };
+            let n = next.len().min(buf.len());
+            buf[..n].copy_from_slice(&next[..n]);
+            if n < next.len() {
+                self.reads.push_front(next.split_off(n));
+            }
+            Ok(n)
+        }
+    }
+
+    impl Write for Conn {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.written.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn post(length: usize, body: &[u8]) -> Vec<Vec<u8>> {
+        let head = format!("POST /x HTTP/1.1\r\nContent-Length: {length}\r\n\r\n");
+        vec![head.into_bytes(), body.to_vec()]
+    }
+
+    #[test]
+    fn a_head_past_its_limit_is_refused_whatever_the_reads_size() {
+        // Reads of 5000 bytes step over the limit, never onto it.
+        let reads = vec![vec![b'a'; 5000]; 5];
+        assert_eq!(read_request(&mut Conn::new(reads)), Err(431));
+    }
+
+    #[test]
+    fn a_body_up_to_its_limit_is_read_whole_across_reads_and_one_past_is_refused() {
+        let body = vec![b'v'; BODY_MAX];
+        let (method, target, read) = read_request(&mut Conn::new(post(BODY_MAX, &body))).unwrap();
+        assert_eq!((method.as_str(), target.as_str()), ("POST", "/x"));
+        assert_eq!(read, body);
+        let over = post(BODY_MAX + 1, &[b'v'; BODY_MAX + 1]);
+        assert_eq!(read_request(&mut Conn::new(over)), Err(413));
+        let short = post(10, b"abc");
+        assert_eq!(read_request(&mut Conn::new(short)), Err(400));
+    }
+
+    #[test]
+    fn each_answer_has_its_status_line_and_closes() {
+        let link = Mutex::new(Link::new(
+            "svc",
+            "default",
+            None,
+            Vec::new(),
+            link::Token::fresh(),
+            SystemTime::now(),
+            link::LIFETIME,
+        ));
+        for (request, line) in [
+            (
+                b"GET /nope HTTP/1.1\r\n\r\n".to_vec(),
+                "HTTP/1.1 404 Not Found\r\n",
+            ),
+            (b"garbage".to_vec(), "HTTP/1.1 400 Bad Request\r\n"),
+        ] {
+            let mut conn = Conn::new(vec![request]);
+            assert_eq!(exchange(&mut conn, &link), None);
+            let written = String::from_utf8(conn.written).unwrap();
+            assert!(written.starts_with(line), "{written}");
+            assert!(written.contains("Connection: close\r\n"), "{written}");
+        }
+        let gone = [
+            (405, "Method Not Allowed"),
+            (410, "Gone"),
+            (413, "Content Too Large"),
+            (431, "Request Header Fields Too Large"),
+            (200, "OK"),
+        ];
+        for (status, phrase) in gone {
+            assert_eq!(reason(status), phrase);
+        }
+    }
+}
