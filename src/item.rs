@@ -520,6 +520,27 @@ mod tests {
         assert_eq!(read(&stored(&over)).unwrap(), (name, secret));
     }
 
+    #[test]
+    fn a_field_naming_its_section_by_id_alone_is_read_and_rewritten_as_optokens() {
+        let (name, secret) = secret();
+        let mut item = stored(&template(&name, &secret, None));
+        for f in item["fields"].as_array_mut().unwrap() {
+            if let Some(section) = f["section"].as_object_mut() {
+                section.remove("label");
+            }
+        }
+        assert_eq!(read(&item).unwrap(), (name.clone(), secret.clone()));
+        let over = template(&name, &secret, Some(&item));
+        let fresh = template(&name, &secret, None);
+        let fields = over["fields"].as_array().unwrap();
+        assert_eq!(
+            fields[..fields.len() - 1],
+            fresh["fields"].as_array().unwrap()[..],
+            "optokens' own fields are rewritten, not kept twice"
+        );
+        assert_eq!(fields[fields.len() - 1]["purpose"], "NOTES");
+    }
+
     /// An item as an earlier optokens wrote it: titled `<service>/<account>`,
     /// no name in its section.
     fn old(name: &Name, secret: &Secret) -> Value {
