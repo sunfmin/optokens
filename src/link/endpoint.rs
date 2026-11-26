@@ -1,5 +1,6 @@
 //! Where a link listens and over which scheme, from what `tailscale` answered.
 
+use crate::doctor::{no_tailnet_address, tailscale_missing};
 use crate::refusal::Refusal;
 use crate::tailscale;
 use std::net::IpAddr;
@@ -12,13 +13,11 @@ pub fn listen_address(
     tailscale_ip: Option<&str>,
 ) -> Result<IpAddr, Refusal> {
     let Some(answer) = tailscale_ip else {
-        return Err(nothing_stored(tailscale::missing()));
+        return Err(nothing_stored(tailscale_missing()));
     };
     let tailnet = tailscale::addresses(answer);
     let Some(first) = tailnet.first() else {
-        return Err(nothing_stored(tailscale::no_address(
-            "it printed no address",
-        )));
+        return Err(nothing_stored(no_tailnet_address("it printed no address")));
     };
     tailnet
         .iter()

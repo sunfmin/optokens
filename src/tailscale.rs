@@ -1,8 +1,6 @@
 //! The Tailscale CLI, `tailscale`: the one module that builds its command
 //! lines and reads its answers. The tests' stand-in shares these constants.
 
-use crate::doctor::Finding;
-use crate::refusal::Refusal;
 use std::net::IpAddr;
 
 /// The program's name on `PATH`.
@@ -25,24 +23,6 @@ pub fn addresses(stdout: &str) -> Vec<IpAddr> {
         .lines()
         .filter_map(|l| l.trim().parse().ok())
         .collect()
-}
-
-/// `tailscale` is not on `PATH`.
-pub fn missing() -> Refusal {
-    Refusal::of(
-        &Finding::TailscaleMissing,
-        "`tailscale` is not on PATH",
-        "install Tailscale (https://tailscale.com/download) and put `tailscale` on PATH",
-    )
-}
-
-/// `tailscale ip` gave no address, `why`.
-pub fn no_address(why: &str) -> Refusal {
-    Refusal::of(
-        &Finding::NoTailnetAddress,
-        format!("`tailscale ip`: {why}"),
-        "run `tailscale up`",
-    )
 }
 
 /// The names `tailscale cert` can get a certificate for, from `status --json`.
