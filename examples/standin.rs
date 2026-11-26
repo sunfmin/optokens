@@ -183,6 +183,8 @@ fn item(state: &mut Value, words: &[&str]) -> String {
     if state["op"]["items"].is_null() {
         state["op"]["items"] = json!([]);
     }
+    // `op.lose_writes`: a create answers as stored, but nothing is kept.
+    let lose = state["op"]["lose_writes"] == true;
     let items = state["op"]["items"].as_array_mut().unwrap();
     let position = |items: &Vec<Value>, id: &str| {
         items
@@ -207,7 +209,9 @@ fn item(state: &mut Value, words: &[&str]) -> String {
         [op::CREATE, ..] => {
             let id = format!("id{}", items.len() + 1);
             let item = keep(&stdin_template(), &id, &vault);
-            items.push(item.clone());
+            if !lose {
+                items.push(item.clone());
+            }
             item.to_string()
         }
         [op::EDIT, id, ..] => match position(items, id) {

@@ -325,4 +325,51 @@ fn nothing_is_written_before_a_submission_nor_when_init_is_refused() {
     assert_eq!(both.code, 2);
     let none = bare.run(&["init", "--check"], &[], None);
     assert_eq!(kinds(&none.json()), ["no_token"]);
+    let homeless = bare.run(&["init"], &[("HOME", "")], None);
+    assert_eq!(
+        kinds(&homeless.json()),
+        ["no_config_dir", "tailscale_missing"]
+    );
+}
+
+#[test]
+fn a_token_file_that_cannot_be_written_is_refused_and_leaves_nothing_beside_it() {
+    let host = host(json!({}));
+    // A directory where the token file goes: the rename over it fails.
+    std::fs::create_dir_all(host.config().join("token/inside")).unwrap();
+    let (_, ran) = init(&host, &[], &[]);
+    assert_eq!(ran.code, 2, "{}", ran.stdout);
+    let token = host.config().join("token");
+    let fault = ran.json()["error"][0]["fault"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        fault.starts_with(&format!("cannot write `{}`: ", token.display())),
+        "{fault}"
+    );
+    assert_eq!(
+        ran.json()["error"][0]["fix"],
+        format!(
+            "make {} a directory this user can write, then run `optokens init` again",
+            host.config().display()
+        )
+    );
+    assert_eq!(files(&host), ["token"], "the fresh file is removed");
+    assert!(op_verbs(&host).is_empty());
+}
+
+#[test]
+fn a_probe_that_does_not_read_back_is_refused() {
+    let host = host(json!({ "lose_writes": true }));
+    let (_, ran) = init(&host, &[], &[]);
+    assert_eq!(kinds(&ran.json()), ["probe_read_back"]);
+    assert!(
+        ran.json()["error"][0]["fault"]
+            .as_str()
+            .unwrap()
+            .starts_with("check `probe_read_back`: the probe item read back is not what was written; the token file"),
+        "{}",
+        ran.stdout
+    );
 }
