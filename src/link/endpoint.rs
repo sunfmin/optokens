@@ -30,7 +30,8 @@ pub fn listen_address(
         })
 }
 
-fn nothing_stored(refusal: Refusal) -> Refusal {
+/// `refusal`, said as the reason no link is served and nothing stored.
+pub fn nothing_stored(refusal: Refusal) -> Refusal {
     Refusal {
         fault: format!(
             "no one-time link can be served, so nothing is stored: {}",

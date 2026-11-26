@@ -9,6 +9,9 @@ pub const PROGRAM: &str = "tailscale";
 pub const IP: &[&str] = &["ip"];
 /// What prints the tailnet's state as JSON.
 pub const STATUS: &[&str] = &["status", "--json"];
+/// What prints the certificate and then its key for the name that follows, as
+/// PEM on its stdout: nothing is written to a file.
+pub const CERT: &[&str] = &["cert", "--cert-file", "-", "--key-file", "-"];
 /// The key of `status --json` listing the names `tailscale cert` can get a
 /// certificate for: empty unless the tailnet has HTTPS certificates on.
 pub const CERT_DOMAINS: &str = "CertDomains";

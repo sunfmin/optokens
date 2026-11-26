@@ -31,6 +31,15 @@ impl Ran {
     }
 }
 
+/// What a finished run printed, and how it exited.
+pub fn ran(out: std::process::Output) -> Ran {
+    Ran {
+        code: out.status.code().unwrap(),
+        stdout: String::from_utf8(out.stdout).unwrap(),
+        stderr: String::from_utf8(out.stderr).unwrap(),
+    }
+}
+
 fn standin() -> PathBuf {
     Path::new(env!("CARGO_BIN_EXE_optokens"))
         .parent()
@@ -85,7 +94,17 @@ impl Host {
     /// optokens `args` with only `env`, the stand-ins and this host's home
     /// and `TMPDIR`; `stdin` piped in, else empty.
     pub fn run(&self, args: &[&str], env: &[(&str, &str)], stdin: Option<&[u8]>) -> Ran {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_optokens"))
+        let mut child = self.spawn(args, env);
+        let mut pipe = child.stdin.take().unwrap();
+        pipe.write_all(stdin.unwrap_or_default()).unwrap();
+        drop(pipe);
+        ran(child.wait_with_output().unwrap())
+    }
+
+    /// optokens `args` started as [`Host::run`] starts it, its stdin, stdout
+    /// and stderr piped, for a test that talks to it while it runs.
+    pub fn spawn(&self, args: &[&str], env: &[(&str, &str)]) -> std::process::Child {
+        Command::new(env!("CARGO_BIN_EXE_optokens"))
             .args(args)
             .env_clear()
             // A coverage run's profile path: without it the run writes `default_*.profraw` here and counts none of it.
@@ -99,16 +118,7 @@ impl Host {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .unwrap();
-        let mut pipe = child.stdin.take().unwrap();
-        pipe.write_all(stdin.unwrap_or_default()).unwrap();
-        drop(pipe);
-        let out = child.wait_with_output().unwrap();
-        Ran {
-            code: out.status.code().unwrap(),
-            stdout: String::from_utf8(out.stdout).unwrap(),
-            stderr: String::from_utf8(out.stderr).unwrap(),
-        }
+            .unwrap()
     }
 
     /// `optokens doctor` with only `env` and the stand-ins: its exit code and answer.

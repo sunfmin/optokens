@@ -17,7 +17,15 @@ fn field(label: &str, input: Input) -> Field {
 }
 
 fn link_of(fields: Vec<Field>, description: Option<&str>) -> Link {
-    Link::new("svc", "default", description, fields, Token::fresh(), t0())
+    Link::new(
+        "svc",
+        "default",
+        description,
+        fields,
+        Token::fresh(),
+        t0(),
+        LIFETIME,
+    )
 }
 
 fn link() -> Link {
@@ -229,6 +237,7 @@ fn every_piece_of_text_is_escaped() {
         vec![field("\"", Input::Password)],
         Token::fresh(),
         t0(),
+        LIFETIME,
     );
     let path = link.path();
     let body = link.handle(&get(&path), t0()).0.body;

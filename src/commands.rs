@@ -3,10 +3,14 @@
 
 use crate::account::Env;
 use crate::cli::Answer;
+use crate::item;
+use crate::link::{self, Input, Link, Token};
 use crate::refusal::Refusal;
 use crate::secret::{self, Kind, Name, Put};
+use crate::serve::Endpoint;
 use crate::store::Store;
 use serde_json::{Value, json};
+use std::time::{Duration, SystemTime};
 
 // `put`'s command line; its help is the manual's.
 #[derive(clap::Args)]
@@ -29,10 +33,10 @@ pub struct PutArgs {
     /// The label of the one Field whose value is all of stdin, piped in by a command.
     #[arg(long, value_name = "Label", verbatim_doc_comment)]
     field_from_stdin: Option<String>,
-    /// Fields a person enters on a one-time link: refused, as this optokens does not serve the link yet.
+    /// The labels of the Fields a person enters on the one-time link, comma-separated.
     #[arg(long, value_name = "Label,...", verbatim_doc_comment)]
     fields: Option<String>,
-    /// Fields of `--fields` shown as typed: refused with `--fields`.
+    /// Labels of `--fields` whose inputs show what is typed: for values that are not secret.
     #[arg(long, value_name = "Label,...", verbatim_doc_comment)]
     show: Option<String>,
 }
@@ -45,6 +49,15 @@ pub fn put(env: &Env, args: PutArgs, terminal: bool, read: impl FnOnce() -> Vec<
         Err(faults) => Answer::refused(faults),
     }
 }
+
+/// A comma-separated list of labels, each trimmed.
+fn labels(list: &str) -> Vec<String> {
+    list.split(',').map(|l| l.trim().to_string()).collect()
+}
+
+/// The environment variable a test sets to shorten a link's lifetime, in
+/// milliseconds; the manual does not list it.
+const TEST_LIFETIME: &str = "OPTOKENS_TEST_LINK_LIFETIME_MS";
 
 fn put_secret(
     env: &Env,
@@ -63,11 +76,21 @@ fn put_secret(
             Err(refusal) => faults.push(refusal),
         }
     }
-    if args.fields.is_some() || args.show.is_some() {
+    let asked = args.fields.as_deref().map(labels).unwrap_or_default();
+    let shown = args.show.as_deref().map(labels).unwrap_or_default();
+    let unasked: Vec<&String> = shown.iter().filter(|l| !asked.contains(l)).collect();
+    if !unasked.is_empty() {
         faults.push(Refusal::of(
-            &secret::Fault::NeedsLink,
-            "`--fields` and `--show` take values a person enters on a one-time link, which this optokens does not serve yet",
-            secret::NEEDS_LINK_FIX,
+            &secret::Fault::BadShow,
+            format!(
+                "`--show` names {}, which `--fields` does not",
+                unasked
+                    .iter()
+                    .map(|l| format!("`{l}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            "name each `--show` label in `--fields` too",
         ));
     }
     if let Some(label) = &args.field_from_stdin {
@@ -76,17 +99,49 @@ fn put_secret(
             Err(refusal) => faults.push(refusal),
         }
     }
+    // A bare `put` names no Field: its one value is entered on the link,
+    // unless it is a `--description` alone for a stored Secret.
+    let bare = args.set.is_empty() && args.field_from_stdin.is_none() && asked.is_empty();
+    let path = std::env::var_os("PATH");
+    let mut endpoint = None;
+    if !asked.is_empty() || (bare && args.description.is_none()) {
+        match Endpoint::open(path.as_deref()) {
+            Ok(opened) => endpoint = Some(opened),
+            Err(refusal) => faults.push(refusal),
+        }
+    }
     let (Some(name), true) = (name, faults.is_empty()) else {
         return Err(faults);
-    };
-    let put = Put {
-        kind: args.kind,
-        description: args.description,
-        fields,
     };
     let store = Store::open(env)?;
     let found = store.find(&name).map_err(|r| vec![r])?;
     let existing = found.as_ref().map(|f| &f.secret);
+    let single = bare && (args.description.is_none() || existing.is_none());
+    if single && endpoint.is_none() {
+        endpoint = Some(Endpoint::open(path.as_deref()).map_err(|r| vec![r])?);
+    }
+    let mut put = Put {
+        kind: args.kind,
+        description: args.description,
+        fields,
+        value: single.then(String::new),
+    };
+    put.fields
+        .extend(asked.iter().map(|l| (l.clone(), String::new())));
+    // Every fault is refused before the link is served.
+    secret::merge(&name, existing, &put)?;
+    if let Some(endpoint) = endpoint {
+        let link = link_for(&name, existing, &put, &asked, &shown);
+        let mut values = endpoint.serve(&name, link).map_err(|r| vec![r])?;
+        match &mut put.value {
+            Some(value) => *value = values.pop_first().map(|(_, v)| v).unwrap_or_default(),
+            None => {
+                for (label, value) in put.fields.iter_mut().rev().take(asked.len()) {
+                    *value = values.remove(label).unwrap_or_default();
+                }
+            }
+        }
+    }
     let merged = secret::merge(&name, existing, &put)?;
     let changed = existing != Some(&merged);
     if changed {
@@ -100,6 +155,64 @@ fn put_secret(
         "kind": merged.kind.name(),
         "fields": merged.labels(),
     }))
+}
+
+/// The link that asks for the `asked` Fields (`shown` as typed), or the bare
+/// `put`'s one value, and shows each stored Field this `put` keeps as already set.
+fn link_for(
+    name: &Name,
+    existing: Option<&secret::Secret>,
+    put: &Put,
+    asked: &[String],
+    shown: &[String],
+) -> Link {
+    let kept = match existing.map(|e| &e.values) {
+        Some(secret::Values::Fields(stored)) => stored
+            .iter()
+            .filter(|(l, _)| !put.fields.iter().any(|(p, _)| p == l))
+            .map(|(l, _)| link::Field {
+                label: l.clone(),
+                input: Input::AlreadySet,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    let fields: Vec<link::Field> = if put.value.is_some() {
+        vec![link::Field {
+            label: item::SINGLE.to_string(),
+            input: Input::Password,
+        }]
+    } else {
+        asked
+            .iter()
+            .map(|l| link::Field {
+                label: l.clone(),
+                input: if shown.contains(l) {
+                    Input::Text
+                } else {
+                    Input::Password
+                },
+            })
+            .chain(kept)
+            .collect()
+    };
+    let lifetime = std::env::var(TEST_LIFETIME)
+        .ok()
+        .and_then(|ms| ms.parse().ok())
+        .map_or(link::LIFETIME, Duration::from_millis);
+    let description = put
+        .description
+        .as_deref()
+        .or_else(|| existing.and_then(|e| e.description.as_deref()));
+    Link::new(
+        name.service(),
+        name.account(),
+        description,
+        fields,
+        Token::fresh(),
+        SystemTime::now(),
+        lifetime,
+    )
 }
 
 /// `name`'s Secret from the vault, or the refusal that it is not there.

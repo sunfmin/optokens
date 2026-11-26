@@ -375,20 +375,20 @@ fn put_refuses_every_fault_before_it_reaches_the_vault() {
     );
     assert_eq!(
         kinds(&many.json()),
-        ["bad_name", "bad_set", "needs_link", "stdin_empty"]
+        ["bad_name", "bad_set", "stdin_empty", "tailscale_missing"]
     );
     assert_eq!(
         host.calls(),
         Value::Null,
         "no refusal before the vault calls op"
     );
-    // A bare put reads the vault: a `--description` alone may change a stored Secret.
+    // A bare put asks for its value on the link: without a tailnet, the vault is not read.
     let link = run(&host, &["put", "cloudflare"]);
-    assert_eq!(kinds(&link.json()), ["needs_link"]);
-    assert_eq!(
-        link.json()["error"][0]["fix"],
-        "pipe a value a command makes with `--field-from-stdin <Label>`, or `--set \"NAME=value\"` one that is not secret"
-    );
+    assert_eq!(kinds(&link.json()), ["tailscale_missing"]);
+    assert_eq!(host.calls(), Value::Null);
+    // A `--description` alone for a Secret not stored asks for its value too, after reading the vault.
+    let described = run(&host, &["put", "cloudflare", "--description", "DNS"]);
+    assert_eq!(kinds(&described.json()), ["tailscale_missing"]);
     let names = run(
         &host,
         &[
@@ -398,7 +398,8 @@ fn put_refuses_every_fault_before_it_reaches_the_vault() {
     assert_eq!(kinds(&names.json()), ["not_env_name", "duplicate_label"]);
     assert_eq!(
         op_lines(&host),
-        ["item list --vault optokens --format json"; 2]
+        ["item list --vault optokens --format json"; 2],
+        "one list for the described put, one for the refused names"
     );
     assert_eq!(run(&host, &["put", "p", "--set", "A=1"]).code, 0);
     let kind = run(&host, &["put", "p", "--kind", "profile", "--set", "A=1"]);
