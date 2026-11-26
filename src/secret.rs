@@ -33,6 +33,12 @@ pub enum Fault {
     StdinEmpty,
     /// What `--field-from-stdin` read is not UTF-8 text. Fix: pipe it through `base64` first.
     StdinNotText,
+    /// A `--field-from-pipe` is not `Label=<path>`, or its path is missing, a file, a terminal, or anything but a pipe, or cannot be read. The refusal names the Label, never the path, which after a mistaken `Label=$(command)` is the secret itself. Fix: give a command's output through `Label=<(command)`, never a file.
+    NotAPipe,
+    /// A `--field-from-pipe` read nothing, or a lone newline. Fix: see that the command in `<(command)` prints the value.
+    PipeEmpty,
+    /// What a `--field-from-pipe` read is not UTF-8 text. Fix: pipe it through `base64` first, `<(command | base64)`.
+    PipeNotText,
     /// No Secret of that service and account is in the vault. Fix: `optokens list` to see what is there, or `optokens put` it.
     NotFound,
     /// `get` cannot pick the value: `--field` names no Field of the Secret, a Secret of labelled Fields was asked for without `--field`, or a single value was asked for with one. Fix: the `get` line the finding names.
@@ -97,7 +103,8 @@ impl Field {
 /// changes how 1Password shows it, never what optokens gives out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
-    /// Hidden like a password: a value piped in (`--field-from-stdin`), or
+    /// Hidden like a password: a value piped in (`--field-from-stdin`,
+    /// `--field-from-pipe`), or
     /// typed into a hidden input of the one-time link.
     Concealed,
     /// Plain text: a value given on the command line (`--set`), or typed into
@@ -179,7 +186,8 @@ impl Name {
 }
 
 /// What one `put` names: the kind and description it gives, and its Fields'
-/// values in order (each `--set`, then `--field-from-stdin`, then `--fields`),
+/// values in order (each `--set`, then `--field-from-stdin`, then each
+/// `--field-from-pipe`, then `--fields`),
 /// or the single value of a bare `put`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Put {
@@ -212,6 +220,23 @@ fn bad_set(fault: String) -> Refusal {
     )
 }
 
+/// Why what came in on a pipe is no value.
+enum NoText {
+    Empty,
+    NotText,
+}
+
+/// What a pipe carried, as text: one trailing `\n` dropped.
+fn piped_text(mut bytes: Vec<u8>) -> Result<String, NoText> {
+    if bytes.last() == Some(&b'\n') {
+        bytes.pop();
+    }
+    if bytes.is_empty() {
+        return Err(NoText::Empty);
+    }
+    String::from_utf8(bytes).map_err(|_| NoText::NotText)
+}
+
 /// What `--field-from-stdin` read, as the Field's value: one trailing `\n`
 /// dropped. Refused when stdin is a terminal (checked first, so nothing is
 /// read), empty, or not UTF-8.
@@ -223,24 +248,58 @@ pub fn stdin_value(terminal: bool, read: impl FnOnce() -> Vec<u8>) -> Result<Str
             "pipe the value a command makes into `optokens put`; a value a person knows is entered on the one-time link",
         ));
     }
-    let mut bytes = read();
-    if bytes.last() == Some(&b'\n') {
-        bytes.pop();
-    }
-    if bytes.is_empty() {
-        return Err(Refusal::of(
+    piped_text(read()).map_err(|no| match no {
+        NoText::Empty => Refusal::of(
             &Fault::StdinEmpty,
             "`--field-from-stdin` read no value from stdin",
             "pipe the value in, such as `openssl rand -base64 32 | optokens put <service> --field-from-stdin <Label>`",
-        ));
-    }
-    String::from_utf8(bytes).map_err(|_| {
-        Refusal::of(
+        ),
+        NoText::NotText => Refusal::of(
             &Fault::StdinNotText,
             "what `--field-from-stdin` read is not UTF-8 text",
             "pipe it through `base64` first",
-        )
+        ),
     })
+}
+
+/// The `n`th (from 1) `--field-from-pipe "Label=<path>"`, split on the first
+/// `=`, as a concealed Field of what `read` read at the path: `None` when the
+/// path is no pipe, before anything is read. A refusal names the Label and
+/// never the path, which after a mistaken `Label=$(command)` is the secret.
+pub fn pipe_field(
+    n: usize,
+    arg: &str,
+    read: impl FnOnce(&str) -> Option<Vec<u8>>,
+) -> Result<Field, Refusal> {
+    let fix =
+        "give a command's output through `--field-from-pipe <Label>=<(command)`, never a file";
+    let Some((label, path)) = arg.split_once('=').filter(|(l, _)| !l.is_empty()) else {
+        return Err(Refusal::of(
+            &Fault::NotAPipe,
+            format!("`--field-from-pipe` number {n} names no `Label=` before its pipe"),
+            fix,
+        ));
+    };
+    let Some(bytes) = read(path) else {
+        return Err(Refusal::of(
+            &Fault::NotAPipe,
+            format!("`--field-from-pipe {label}=` names no pipe that can be read"),
+            fix,
+        ));
+    };
+    match piped_text(bytes) {
+        Ok(value) => Ok(Field::new(label, &value, Visibility::Concealed)),
+        Err(NoText::Empty) => Err(Refusal::of(
+            &Fault::PipeEmpty,
+            format!("`--field-from-pipe {label}=` read no value"),
+            "see that the command in `<(command)` prints the value",
+        )),
+        Err(NoText::NotText) => Err(Refusal::of(
+            &Fault::PipeNotText,
+            format!("what `--field-from-pipe {label}=` read is not UTF-8 text"),
+            "pipe it through `base64` first, `<(command | base64)`",
+        )),
+    }
 }
 
 /// Whether `label` can be an environment variable's name.
@@ -738,6 +797,35 @@ mod tests {
             stdin_value(false, || vec![0xff, 0xfe]).unwrap_err().kind,
             Some("stdin_not_text")
         );
+    }
+
+    #[test]
+    fn a_pipe_is_named_by_its_label_and_never_by_its_path() {
+        let read = |want: &'static str, got: Option<&'static [u8]>| {
+            move |path: &str| {
+                assert_eq!(path, want);
+                got.map(<[u8]>::to_vec)
+            }
+        };
+        assert_eq!(
+            pipe_field(1, "Key=/dev/fd/11", read("/dev/fd/11", Some(b"k=v\n"))).unwrap(),
+            Field::new("Key", "k=v", Visibility::Concealed)
+        );
+        let secret = "Key=s3cr3t-value";
+        let refused = pipe_field(1, secret, read("s3cr3t-value", None)).unwrap_err();
+        assert_eq!(refused.kind, Some("not_a_pipe"));
+        assert!(!format!("{refused:?}").contains("s3cr3t"), "{refused:?}");
+        let unlabelled = pipe_field(2, "s3cr3t", |_| panic!("never read")).unwrap_err();
+        assert_eq!(unlabelled.kind, Some("not_a_pipe"));
+        assert!(!format!("{unlabelled:?}").contains("s3cr3t"));
+        assert!(pipe_field(3, "=/dev/fd/3", |_| panic!("never read")).is_err());
+        let kind = |bytes: &'static [u8]| {
+            pipe_field(1, "K=p", read("p", Some(bytes)))
+                .unwrap_err()
+                .kind
+        };
+        assert_eq!(kind(b"\n"), Some("pipe_empty"));
+        assert_eq!(kind(&[0xff]), Some("pipe_not_text"));
     }
 
     #[test]

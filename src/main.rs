@@ -10,6 +10,7 @@ mod init;
 mod item;
 mod link;
 mod op;
+mod pipe;
 mod program;
 mod refusal;
 mod secret;

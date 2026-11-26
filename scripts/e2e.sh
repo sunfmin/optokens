@@ -1,6 +1,6 @@
 #!/bin/sh
 # The end-to-end check against a real 1Password vault and the real `op`:
-# put -> list -> get -> env -> put again (upsert) -> rm, each answer checked,
+# put -> list -> get -> env -> put again (upsert) -> a put of two pipes -> rm, each answer checked,
 # the item and its field types checked in the vault through `op item get`, and `ps` sampled during
 # the put for the value. Outside the gate: it needs the network and a token.
 #
@@ -150,6 +150,22 @@ item=$(op item get "$title" --vault "$vault" --format json)
 types "after the upsert"
 run put "$service" --set "A=2"
 check "the same put again writes nothing" '.changed == false' "$out"
+
+pipe1=$(openssl rand -hex 16) pipe2=$(openssl rand -base64 24)
+say "optokens put $service --field-from-pipe PIPE1=<(printf ...) --field-from-pipe PIPE2=<(printf ...)  (bash; values from openssl rand)"
+# The values reach bash in its environment, which it drops before it runs
+# optokens: only its builtin printf holds them, and argv only /dev/fd/N.
+out=$(P1=$pipe1 P2=$pipe2 /bin/bash -c 'a=$P1 b=$P2; unset P1 P2; "$0" put "$1" --field-from-pipe PIPE1=<(printf "%s\n" "$a") --field-from-pipe PIPE2=<(printf %s "$b")' "$bin" "$service") ||
+    { rc=$?; printf '%s\n' "$out"; fail "the two-pipe put exited $rc"; }
+echo "$out"
+check "the two-pipe put added both" '.changed and .fields == ["A","TOKEN","PIPE1","PIPE2"]' "$out"
+item=$(op item get "$title" --vault "$vault" --format json)
+check "PIPE1 and PIPE2 are CONCEALED in the vault" \
+    '[.fields[] | select(.section.label == "fields" and (.label | startswith("PIPE"))) | .type] == ["CONCEALED","CONCEALED"]' "$item"
+printf '%s' "$item" | jq -e --arg a "$pipe1" --arg b "$pipe2" \
+    '([.fields[] | select(.section.label == "fields") | {(.label): .value}] | add) as $f | $f.PIPE1 == $a and $f.PIPE2 == $b' >/dev/null ||
+    fail "the vault's PIPE1 or PIPE2 is not the value its pipe carried"
+echo "ok: the vault's PIPE1 and PIPE2 are the values their pipes carried"
 
 say "optokens rm $service"
 run rm "$service"
