@@ -1,7 +1,7 @@
 #!/bin/sh
 # The end-to-end check against a real 1Password vault and the real `op`:
 # put -> list -> get -> env -> put again (upsert) -> rm, each answer checked,
-# the item checked in the vault through `op item get`, and `ps` sampled during
+# the item and its field types checked in the vault through `op item get`, and `ps` sampled during
 # the put for the value. Outside the gate: it needs the network and a token.
 #
 #   scripts/e2e.sh <mytokens-profile> [vault]
@@ -63,6 +63,14 @@ run() {
     out=$("$bin" "$@") || { rc=$?; printf '%s\n' "$out"; fail "optokens $* exited $rc"; }
 }
 mask() { jq -c '(.fields.TOKEN? // empty) |= "***"'; }
+# The vault's item, its field types checked: --set plain, stdin concealed.
+types() { # <when>
+    item=$(op item get "$title" --vault "$vault" --format json)
+    printf '%s' "$item" | jq -c '[.fields[] | select(.section) | {(.section.label + "." + .label): .type}] | add'
+    check "types $1: A STRING, TOKEN CONCEALED, metadata STRING" '
+      [.fields[] | select(.section) | {(.section.label + "." + .label): .type}] | add
+      == {"fields.A":"STRING","fields.TOKEN":"CONCEALED","optokens.kind":"STRING","optokens.shape":"STRING","optokens.description":"STRING"}' "$item"
+}
 
 # ps sampled in a loop for as long as the put runs: the value must never show.
 # `case` is the shell's own, so the value is in no process's argv here either.
@@ -106,6 +114,7 @@ check "kind static, shape fields, the description" '
 printf '%s' "$item" | jq -e --arg v "$value" '[.fields[] | select(.section.label == "fields" and .label == "TOKEN")][0].value == $v' >/dev/null ||
     fail "the vault's TOKEN is not the value piped in"
 echo "ok: the vault's TOKEN is the value piped in"
+types "after the put"
 
 say "optokens list"
 run list
@@ -137,6 +146,8 @@ run get "$service" --json
 printf '%s' "$out" | mask
 printf '%s' "$out" | jq -e --arg v "$value" '.fields.A == "2" and .fields.TOKEN == $v' >/dev/null || fail "upsert lost TOKEN or did not set A"
 echo "ok: A is 2, TOKEN kept"
+say "op item get $title --vault $vault --format json  (types)"
+types "after the upsert"
 run put "$service" --set "A=2"
 check "the same put again writes nothing" '.changed == false' "$out"
 
