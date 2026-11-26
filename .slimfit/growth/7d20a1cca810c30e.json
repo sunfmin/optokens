@@ -1,0 +1,10 @@
+{
+  "tree": "f8fa2f157bb66eb83ff5acecf2c4ab3bdf075b94+d1fba762150c532c",
+  "lines": 55,
+  "serves": "optokens#12",
+  "considered": "Keeping (label, value) tuples with a side table of plain labels (rejected: a name-keyed side table drifts from the Fields); a Visibility on Values::Single (dropped: only a bare put sets it, always concealed); the item.rs field_type helper and the copied single value (cut into the field builder)",
+  "reviewer": "codex:01a218c9-a472-73f3-91a4-7767d00901ff:default",
+  "author": "claude-code:d22d50f7-7b46-5c14-b091-7a55eea65195:opus",
+  "cut": "In src/item.rs, map Visibility to the vault type inside the existing JSON field builder, use Plain for metadata, and serialize the single value or borrowed Fields directly. In scripts/e2e.sh, reuse the item already fetched for the first type check and compute the label-to-type map once per check for both display and assertion. In src/secret.rs, drop the standalone visibility merge test after extending the existing tests/secrets.rs flow to flip the same value in both directions, keep one untouched Field of each type, and verify that repeating the same put writes nothing.",
+  "answer": "All three made (f8fa2f1): the field builder takes the Visibility and metadata passes Plain, field_type is gone, the single value and Fields are borrowed; e2e's types() reads the item already fetched and builds the map once for display and check; the standalone merge test is dropped, and tests/secrets.rs's a_fields_type_follows_how_its_value_came_in flips URL concealed->STRING->CONCEALED, keeps TOKEN concealed and USER STRING untouched, and checks a repeated put writes nothing."
+}
