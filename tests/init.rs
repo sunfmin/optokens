@@ -26,9 +26,9 @@ fn host(op: Value) -> Host {
     Host::new(&["op", "tailscale"], state)
 }
 
-/// `init args`, its link submitted with [`TOKEN`]: what it printed before
+/// `init args`, its link submitted with [`TOKEN`]: how it ended, its stderr
 /// the link, and how it ended.
-fn init(host: &Host, args: &[&str], env: &[(&str, &str)]) -> (String, Ran) {
+fn init(host: &Host, args: &[&str], env: &[(&str, &str)]) -> Ran {
     let waiting = start(host, &[&["init"], args].concat(), env);
     let (status, page) = waiting.request("GET", "");
     assert_eq!(status, 200);
@@ -38,8 +38,7 @@ fn init(host: &Host, args: &[&str], env: &[(&str, &str)]) -> (String, Ran) {
         "{page}"
     );
     assert_eq!(waiting.request("POST", &format!("f0={TOKEN}%0A")).0, 200);
-    let said = waiting.said.clone();
-    (said, waiting.finish())
+    waiting.finish()
 }
 
 fn mode(path: &Path) -> u32 {
@@ -88,10 +87,11 @@ fn the_token_is_written_owner_only_and_checked_with_op_and_a_second_run_is_the_s
     std::fs::set_permissions(host.config(), std::fs::Permissions::from_mode(0o755)).unwrap();
     // The environment's token is another: the checks must use the new one.
     let env = [("OP_SERVICE_ACCOUNT_TOKEN", "ops_old")];
-    let (said, ran) = init(&host, &[], &env);
+    let ran = init(&host, &[], &env);
     assert!(
-        said.ends_with("optokens: open this link to enter the 1Password service account token for the vault `optokens` (it works once, within 10 minutes):\n"),
-        "{said}"
+        ran.stderr.contains("optokens: open this link to enter the 1Password service account token for the vault `optokens` (it works once, within 10 minutes):\nhttp://127.0.0.1:"),
+        "{}",
+        ran.stderr
     );
     assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
     let config = host.config();
@@ -172,7 +172,7 @@ fn the_token_is_written_owner_only_and_checked_with_op_and_a_second_run_is_the_s
     }
 
     // Again, with the same input: the same world.
-    let (_, again) = init(&host, &[], &env);
+    let again = init(&host, &[], &env);
     assert_eq!(again.code, 0, "{}", again.stdout);
     assert_eq!(again.json(), ran.json());
     assert_eq!(files(&host), ["token", "vault"]);
@@ -186,7 +186,7 @@ fn the_token_is_written_owner_only_and_checked_with_op_and_a_second_run_is_the_s
 #[test]
 fn a_vault_the_service_account_cannot_see_is_refused_and_the_token_kept_for_check() {
     let host = host(json!({ "vaults": ["Private"] }));
-    let (_, ran) = init(&host, &["--vault", "team"], &[]);
+    let ran = init(&host, &["--vault", "team"], &[]);
     assert_eq!(ran.code, 2, "{}", ran.stdout);
     assert_eq!(kinds(&ran.json()), ["vault_listed"]);
     let token_file = host.config().join("token");
@@ -237,7 +237,7 @@ fn no_write_grant_is_refused_at_the_probe_and_a_probe_left_behind_is_written_ove
     let host = host(
         json!({ "fail": { "create": 1 }, "stderr": "[ERROR] You do not have permission to perform this action" }),
     );
-    let (_, ran) = init(&host, &[], &[]);
+    let ran = init(&host, &[], &[]);
     assert_eq!(ran.code, 2);
     assert_eq!(kinds(&ran.json()), ["probe_written"]);
     let fault = ran.json()["error"][0]["fault"]
@@ -337,7 +337,7 @@ fn a_token_file_that_cannot_be_written_is_refused_and_leaves_nothing_beside_it()
     let host = host(json!({}));
     // A directory where the token file goes: the rename over it fails.
     std::fs::create_dir_all(host.config().join("token/inside")).unwrap();
-    let (_, ran) = init(&host, &[], &[]);
+    let ran = init(&host, &[], &[]);
     assert_eq!(ran.code, 2, "{}", ran.stdout);
     let token = host.config().join("token");
     let fault = ran.json()["error"][0]["fault"]
@@ -362,7 +362,7 @@ fn a_token_file_that_cannot_be_written_is_refused_and_leaves_nothing_beside_it()
 #[test]
 fn a_probe_that_does_not_read_back_is_refused() {
     let host = host(json!({ "lose_writes": true }));
-    let (_, ran) = init(&host, &[], &[]);
+    let ran = init(&host, &[], &[]);
     assert_eq!(kinds(&ran.json()), ["probe_read_back"]);
     assert!(
         ran.json()["error"][0]["fault"]

@@ -44,15 +44,11 @@ impl Store {
         &self.vault
     }
 
-    /// The names of every vault the service account can see.
-    pub fn vaults(&self) -> Result<Vec<String>, Refusal> {
+    /// Whether `op vault list` shows the vault to the service account.
+    pub fn has_vault(&self) -> Result<bool, Refusal> {
         let list = self.json(Call::Vaults)?;
-        Ok(list
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|v| v["name"].as_str().map(String::from))
-            .collect())
+        let named = |v: &Value| v["name"] == self.vault.as_str();
+        Ok(list.as_array().is_some_and(|all| all.iter().any(named)))
     }
 
     /// `call`'s stdout, `input` on its stdin.

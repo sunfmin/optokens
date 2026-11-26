@@ -160,9 +160,8 @@ mod windows {
         }
     }
 
-    /// Every entry of `file`'s access list, inherited ones too; `None` for a
-    /// null list.
-    pub fn entries(file: &File) -> Result<Option<Vec<Entry>>, String> {
+    /// `file`'s owner and access list, valid while the descriptor lives.
+    fn security(file: &File) -> Result<(PSID, *mut ACL, Descriptor), String> {
         let (mut owner, mut dacl, mut sd): (PSID, *mut ACL, PSECURITY_DESCRIPTOR) =
             (null_mut(), null_mut(), null_mut());
         // SAFETY: a valid open handle; the out pointers are written by the call.
@@ -181,7 +180,13 @@ mod windows {
         if status != ERROR_SUCCESS {
             return Err(format!("GetSecurityInfo failed with error {status}"));
         }
-        let _sd = Descriptor(sd);
+        Ok((owner, dacl, Descriptor(sd)))
+    }
+
+    /// Every entry of `file`'s access list, inherited ones too; `None` for a
+    /// null list.
+    pub fn entries(file: &File) -> Result<Option<Vec<Entry>>, String> {
+        let (owner, dacl, _sd) = security(file)?;
         if dacl.is_null() {
             return Ok(None);
         }
@@ -221,24 +226,7 @@ mod windows {
     /// Replaces `file`'s access list by a protected one (nothing inherited)
     /// granting full control to its owner, SYSTEM and the Administrators group.
     pub fn restrict(file: &File) -> Result<(), String> {
-        let (mut owner, mut sd): (PSID, PSECURITY_DESCRIPTOR) = (null_mut(), null_mut());
-        // SAFETY: a valid open handle; the out pointers are written by the call.
-        let status = unsafe {
-            GetSecurityInfo(
-                file.as_raw_handle() as _,
-                SE_FILE_OBJECT,
-                OWNER_SECURITY_INFORMATION,
-                &mut owner,
-                null_mut(),
-                null_mut(),
-                null_mut(),
-                &mut sd,
-            )
-        };
-        if status != ERROR_SUCCESS {
-            return Err(format!("GetSecurityInfo failed with error {status}"));
-        }
-        let _owned = Descriptor(sd);
+        let (owner, _, _owned) = security(file)?;
         // `owner` points into `sd`, alive until `_owned` drops.
         let sddl = format!("D:P(A;;FA;;;{})(A;;FA;;;SY)(A;;FA;;;BA)", sid_string(owner));
         let wide: Vec<u16> = sddl.encode_utf16().chain([0]).collect();

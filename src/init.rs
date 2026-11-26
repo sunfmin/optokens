@@ -3,7 +3,7 @@
 //! with that token, through `op`, that the service account reads and writes
 //! the vault.
 
-use crate::account::{self, Env, Source, Vault};
+use crate::account::{self, Env};
 use crate::cli::Answer;
 use crate::commands::fresh_link;
 use crate::link::{self, Input};
@@ -54,20 +54,39 @@ pub fn init(env: &Env, args: InitArgs) -> Answer {
 }
 
 fn run(env: &Env, args: InitArgs) -> Result<Value, Vec<Refusal>> {
-    if args.check {
-        let (token, vault) = account::find(env)?;
-        let source = token.source.clone();
-        checks(&Store::new(token, vault.name.clone())).map_err(|r| vec![r])?;
-        return Ok(answer(&source, &vault));
-    }
+    let (token, vault) = if args.check {
+        account::find(env)?
+    } else {
+        let token = enter(env, &args.vault)?;
+        account::save(env, &token, args.vault.trim()).map_err(|r| vec![r])?
+    };
+    let source = token.source.clone();
+    checks(&Store::new(token, vault.name.clone())).map_err(|mut refusal| {
+        if !args.check {
+            refusal.fault = format!(
+                "{}; the token file `{}` and the vault file are written and kept, so once it is fixed `optokens init --check` checks again with no new link",
+                refusal.fault,
+                source.name()
+            );
+        }
+        vec![refusal]
+    })?;
+    Ok(json!({
+        "token": source.json(),
+        "vault": { "name": vault.name, "file": vault.file },
+        "checks": Check::ENTRIES.iter().map(|e| e.name).collect::<Vec<_>>(),
+    }))
+}
+
+/// The token a person submits on the link for `vault`, trimmed; refused,
+/// before any link is served, with every fault of `vault`, the config
+/// directory and the tailnet.
+fn enter(env: &Env, vault: &str) -> Result<String, Vec<Refusal>> {
     let mut faults = Vec::new();
-    let vault = args.vault.trim();
-    if vault.is_empty() || vault.chars().any(char::is_control) {
+    let name = vault.trim();
+    if name.is_empty() || name.chars().any(char::is_control) {
         faults.push(Refusal::new(
-            format!(
-                "`--vault {:?}`: a vault's name is one line, not empty",
-                args.vault
-            ),
+            format!("`--vault {vault:?}`: a vault's name is one line, not empty"),
             "name the vault as 1Password shows it, such as `--vault optokens`",
         ));
     }
@@ -85,33 +104,17 @@ fn run(env: &Env, args: InitArgs) -> Result<Value, Vec<Refusal>> {
         input: Input::Password,
     };
     let about = format!(
-        "The token of the 1Password service account optokens reaches the vault `{vault}` as. It is written to this host's token file, which only its owner may read."
+        "The token of the 1Password service account optokens reaches the vault `{name}` as. It is written to this host's token file, which only its owner may read."
     );
     let link = fresh_link("optokens init", Some(&about), vec![field]);
-    let what = format!("the 1Password service account token for the vault `{vault}`");
+    let what = format!("the 1Password service account token for the vault `{name}`");
     let values = endpoint.serve(link, &what, "init").map_err(|r| vec![r])?;
-    let token = values.into_values().next().unwrap_or_default();
-    let (token, vault) = account::save(env, token.trim(), vault).map_err(|r| vec![r])?;
-    let source = token.source.clone();
-    checks(&Store::new(token, vault.name.clone())).map_err(|refusal| {
-        vec![Refusal {
-            fault: format!(
-                "{}; the token file `{}` and the vault file are written and kept, so once it is fixed `optokens init --check` checks again with no new link",
-                refusal.fault,
-                source.name()
-            ),
-            ..refusal
-        }]
-    })?;
-    Ok(answer(&source, &vault))
-}
-
-fn answer(source: &Source, vault: &Vault) -> Value {
-    json!({
-        "token": source.json(),
-        "vault": { "name": vault.name, "file": vault.file },
-        "checks": Check::ENTRIES.iter().map(|e| e.name).collect::<Vec<_>>(),
-    })
+    Ok(values
+        .into_values()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_string())
 }
 
 /// Each [`Check`] in order, with `store`'s token, until one fails.
@@ -127,8 +130,7 @@ fn checks(store: &Store) -> Result<(), Refusal> {
         )
     };
     let by = |check| move |refusal: Refusal| failed(check, &refusal.fault);
-    let listed = store.vaults().map_err(by(Check::VaultListed))?;
-    if !listed.iter().any(|name| name == vault) {
+    if !store.has_vault().map_err(by(Check::VaultListed))? {
         return Err(failed(
             Check::VaultListed,
             &format!(
