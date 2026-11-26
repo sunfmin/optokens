@@ -324,6 +324,18 @@ mod tests {
     }
 
     #[test]
+    fn a_head_buffered_exactly_at_its_limit_is_still_read_on() {
+        // Reads of 4096 bytes land on the limit; the next one ends the head.
+        let mut head = b"GET /x HTTP/1.1\r\nX-Pad: ".to_vec();
+        head.resize(HEAD_MAX, b'p');
+        let mut reads: Vec<Vec<u8>> = head.chunks(4096).map(<[u8]>::to_vec).collect();
+        reads.push(b"\r\n\r\n".to_vec());
+        let (method, target, body) = read_request(&mut Conn::new(reads)).unwrap();
+        assert_eq!((method.as_str(), target.as_str()), ("GET", "/x"));
+        assert!(body.is_empty());
+    }
+
+    #[test]
     fn a_body_up_to_its_limit_is_read_whole_across_reads_and_one_past_is_refused() {
         let body = vec![b'v'; BODY_MAX];
         let (method, target, read) = read_request(&mut Conn::new(post(BODY_MAX, &body))).unwrap();
@@ -333,6 +345,14 @@ mod tests {
         assert_eq!(read_request(&mut Conn::new(over)), Err(413));
         let short = post(10, b"abc");
         assert_eq!(read_request(&mut Conn::new(short)), Err(400));
+    }
+
+    #[test]
+    fn a_body_of_64_kib_is_read() {
+        // The limit written out, not derived from BODY_MAX, so a smaller limit fails here.
+        let body = vec![b'v'; 64 * 1024];
+        let (_, _, read) = read_request(&mut Conn::new(post(body.len(), &body))).unwrap();
+        assert_eq!(read.len(), 64 * 1024);
     }
 
     #[test]
