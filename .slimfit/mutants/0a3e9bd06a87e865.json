@@ -1,0 +1,27 @@
+{
+  "tree": "017b0c27d7afd799c20f0199797f0c2c19bc0736+d1fba762150c532c",
+  "picker": "codex:01a21771-4ebc-7b41-b36b-f66249db5acb:default",
+  "author": "claude-code:fec84af6-70b4-59cd-8690-96868bf5025a:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/item.rs:133:33: replace match guard label == SINGLE with true in layout",
+        "why": "The malformed single-value fixture has two fields, leaving the refusal of a one-field item with the wrong label untested.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/secret.rs:232:31: replace match guard e.kind != k with true in merge",
+        "why": "The update tests omit the kind or request a different one, leaving explicit reuse of the stored kind untested.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/cli.rs:400:67: replace == with != in run",
+        "why": "The malformed get invocation still goes to stderr, while the shown tests leave malformed env and put invocations unchecked.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  }
+}
