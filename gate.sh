@@ -1,11 +1,14 @@
 #!/bin/sh
-# The fast gate (factorium.toml): fmt, clippy, then slimfit runs the tests once and checks them against .slimfit/baseline.json, then docfit checks this repo's own documents, then the version a tagless clone stamps.
+# The fast gate (factorium.toml): fmt, clippy (native and for Windows), then slimfit runs the tests once and checks them against .slimfit/baseline.json, then docfit checks this repo's own documents, then the version a tagless clone stamps.
 set -eu
 cd "$(dirname "$0")"
 [ -d "$HOME/.cargo/bin" ] && PATH="$HOME/.cargo/bin:$PATH"
 
 cargo fmt --check
 cargo clippy --all-targets --quiet -- -D warnings
+# The Windows build, checked (not linked or run: there is no Windows host), so a
+# Windows-only branch cannot rot. rust-toolchain.toml installs its target.
+cargo clippy --all-targets --target x86_64-pc-windows-msvc --quiet -- -D warnings
 slimfit check
 docfit check
 # Without tags (factorium's promotion clone), a build still stamps the
