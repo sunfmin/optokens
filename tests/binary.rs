@@ -72,3 +72,25 @@ fn an_unknown_topic_is_refused_naming_the_topics() {
         "run `optokens --help` for the topics"
     );
 }
+
+#[test]
+fn put_help_says_what_the_link_serves_where_for_how_long_and_what_it_answers() {
+    let (code, help, _) = optokens(&["put", "--help"]);
+    assert_eq!(code, 0);
+    for said in [
+        "only on this host's tailnet address, from `tailscale ip`",
+        "HTTPS, with the certificate `tailscale cert` gives",
+        "plain HTTP on the tailnet",
+        "one submission, within 10 minutes",
+        "on stderr, while it waits, `optokens: open this link to enter the secret for <service> / <account> (it works once, within 10 minutes):`",
+        "Stdout keeps only the final JSON answer",
+        "## What it answers",
+        "`link_expired`",
+    ] {
+        assert!(help.contains(said), "put --help lacks {said:?}: {help}");
+    }
+    assert!(
+        !help.contains("OPTOKENS_TEST"),
+        "the test's lifetime is not in the manual"
+    );
+}

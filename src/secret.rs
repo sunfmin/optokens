@@ -8,9 +8,6 @@ use serde_json::{Value, json};
 /// The account a Secret is under when `--account` is not given.
 pub const DEFAULT_ACCOUNT: &str = "default";
 
-/// What to do instead of entering a value on the one-time link.
-pub const NEEDS_LINK_FIX: &str = "pipe a value a command makes with `--field-from-stdin <Label>`, or `--set \"NAME=value\"` one that is not secret";
-
 /// Why a command about a Secret refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, agent_help::Help)]
 pub enum Fault {
@@ -24,10 +21,12 @@ pub enum Fault {
     NotEnvName,
     /// `--kind` differs from the stored Secret's kind: `put` never changes a kind. Fix: `optokens rm` the Secret, then `put` it again with the new kind.
     KindChange,
-    /// `put` would turn a single value into labelled Fields, which it never does. Fix: `optokens rm` the Secret, then `put` it again with its Fields.
+    /// `put` would turn a single value into labelled Fields, or labelled Fields into a single value (a bare `put`), which it never does. Fix: `optokens rm` the Secret, then `put` it again in its new shape.
     ShapeChange,
-    /// The values a person knows (`--fields`, `--show`, or a bare `put` of a single value) are entered on a one-time link, which this optokens does not serve yet. Fix: pipe a value a command makes with `--field-from-stdin`, or `--set` a value that is not secret.
-    NeedsLink,
+    /// `--show` names a label `--fields` does not, or is given without `--fields`. Fix: name each `--show` label in `--fields` too.
+    BadShow,
+    /// No value was submitted on the one-time link before it expired, so nothing was stored. Fix: run the same `put` again, and open its new link sooner.
+    LinkExpired,
     /// `--field-from-stdin` was given, but stdin is a terminal: a person would type into a prompt that shows nothing. Fix: pipe the value a command makes into `put`; a value a person knows waits for the one-time link.
     StdinTerminal,
     /// `--field-from-stdin` read nothing, or a lone newline. Fix: pipe the value in, such as `openssl rand -base64 32 | optokens put …`.
@@ -149,12 +148,15 @@ impl Name {
 }
 
 /// What one `put` names: the kind and description it gives, and its Fields'
-/// values in order (each `--set`, then `--field-from-stdin`).
+/// values in order (each `--set`, then `--field-from-stdin`, then `--fields`),
+/// or the single value of a bare `put`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Put {
     pub kind: Option<Kind>,
     pub description: Option<String>,
     pub fields: Vec<(String, String)>,
+    /// A bare `put`'s one value, with no label.
+    pub value: Option<String>,
 }
 
 /// `--set "NAME=value"`, split on the first `=`.
@@ -221,13 +223,6 @@ pub fn is_env_name(label: &str) -> bool {
 pub fn merge(name: &Name, existing: Option<&Secret>, put: &Put) -> Result<Secret, Vec<Refusal>> {
     let mut faults = Vec::new();
     let title = name.title();
-    if put.fields.is_empty() && (put.description.is_none() || existing.is_none()) {
-        faults.push(Refusal::of(
-            &Fault::NeedsLink,
-            format!("`put {title}` names no Field to store: a value a person knows is entered on a one-time link, which this optokens does not serve yet"),
-            NEEDS_LINK_FIX,
-        ));
-    }
     let kind = match (existing, put.kind) {
         (Some(e), Some(k)) if e.kind != k => {
             faults.push(Refusal::of(
@@ -249,22 +244,37 @@ pub fn merge(name: &Name, existing: Option<&Secret>, put: &Put) -> Result<Secret
         (Some(e), _) => e.kind,
         (None, k) => k.unwrap_or(Kind::Static),
     };
-    if let (
-        Some(Secret {
-            values: Values::Single(_),
-            ..
-        }),
-        false,
-    ) = (existing, put.fields.is_empty())
-    {
-        faults.push(Refusal::of(
+    let again = format!(
+        "run `optokens rm {}{}`, then `put` it again in its new shape",
+        shell_word(name.service()),
+        name.flag()
+    );
+    match (
+        existing.map(|e| &e.values),
+        put.fields.is_empty(),
+        &put.value,
+    ) {
+        (Some(Values::Single(_)), false, _) => faults.push(Refusal::of(
             &Fault::ShapeChange,
             format!("`{title}` is a single value, and `put` never turns it into labelled Fields"),
+            again,
+        )),
+        (Some(Values::Fields(_)), _, Some(_)) => faults.push(Refusal::of(
+            &Fault::ShapeChange,
+            format!("`{title}` has labelled Fields, and a bare `put` would make it a single value"),
             format!(
-                "run `optokens rm {}{}`, then `put` it again with its Fields",
+                "name the Fields to change, `optokens put {}{} --fields <Label>,...`; or {again}",
                 shell_word(name.service()),
                 name.flag()
             ),
+        )),
+        _ => {}
+    }
+    if kind == Kind::Profile && put.value.is_some() {
+        faults.push(Refusal::of(
+            &Fault::NotEnvName,
+            format!("`{title}` is a Profile, whose Fields are environment variables' names, and a bare `put` stores one value with no name"),
+            format!("name its Fields: `optokens put {}{} --fields NAME,...`", shell_word(name.service()), name.flag()),
         ));
     }
     for (i, (label, _)) in put.fields.iter().enumerate() {
@@ -290,10 +300,10 @@ pub fn merge(name: &Name, existing: Option<&Secret>, put: &Put) -> Result<Secret
     if !faults.is_empty() {
         return Err(faults);
     }
-    let values = match existing.map(|e| &e.values) {
-        Some(Values::Single(value)) => Values::Single(value.clone()),
+    let values = match (existing.map(|e| &e.values), &put.value) {
+        (_, Some(value)) | (Some(Values::Single(value)), None) => Values::Single(value.clone()),
         stored => {
-            let mut fields = match stored {
+            let mut fields = match stored.0 {
                 Some(Values::Fields(fields)) => fields.clone(),
                 _ => Vec::new(),
             };
@@ -473,6 +483,7 @@ mod tests {
                 .iter()
                 .map(|(l, v)| (l.to_string(), v.to_string()))
                 .collect(),
+            value: None,
         }
     }
 
@@ -562,12 +573,43 @@ mod tests {
             }
         );
         assert_eq!(
-            kinds(&merge(&name(), None, &described).unwrap_err()),
-            ["needs_link"]
+            merge(&name(), Some(&stored), &Put::default()).unwrap(),
+            stored,
+            "a put of nothing changes nothing"
         );
+    }
+
+    #[test]
+    fn a_bare_put_sets_or_replaces_a_single_value_and_never_fields() {
+        let bare = |v: &str| Put {
+            value: Some(v.into()),
+            ..Put::default()
+        };
+        let made = merge(&name(), None, &bare("v1")).unwrap();
+        assert_eq!(made.values, Values::Single("v1".into()));
+        assert_eq!(made.kind, Kind::Static);
+        let rotated = merge(&name(), Some(&made), &bare("v2")).unwrap();
+        assert_eq!(rotated.values, Values::Single("v2".into()));
+        let aws = Secret {
+            kind: Kind::Static,
+            description: None,
+            values: fields(&[("A", "1")]),
+        };
+        let faults = merge(&Name::new("aws", "ci").unwrap(), Some(&aws), &bare("v")).unwrap_err();
+        assert_eq!(kinds(&faults), ["shape_change"]);
         assert_eq!(
-            kinds(&merge(&name(), Some(&stored), &Put::default()).unwrap_err()),
-            ["needs_link"]
+            faults[0].fix,
+            "name the Fields to change, `optokens put aws --account ci --fields <Label>,...`; or run `optokens rm aws --account ci`, then `put` it again in its new shape"
+        );
+        let profile = Put {
+            kind: Some(Kind::Profile),
+            ..bare("v")
+        };
+        let faults = merge(&name(), None, &profile).unwrap_err();
+        assert_eq!(kinds(&faults), ["not_env_name"]);
+        assert_eq!(
+            faults[0].fix,
+            "name its Fields: `optokens put glm --fields NAME,...`"
         );
     }
 
@@ -619,7 +661,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             faults[0].fix,
-            "run `optokens rm glm --account work`, then `put` it again with its Fields"
+            "run `optokens rm glm --account work`, then `put` it again in its new shape"
         );
     }
 

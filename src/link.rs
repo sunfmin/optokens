@@ -7,7 +7,7 @@
 mod endpoint;
 mod page;
 
-pub use endpoint::{Scheme, listen_address, scheme};
+pub use endpoint::{Scheme, listen_address, nothing_stored, scheme};
 
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime};
@@ -70,6 +70,11 @@ impl Response {
         }
     }
 
+    /// A request that could not be read, refused with `status`.
+    pub fn bad(status: u16) -> Response {
+        Response::text(status, "Bad request.")
+    }
+
     fn html(status: u16, body: String) -> Response {
         Response {
             status,
@@ -95,7 +100,8 @@ pub struct Link {
 }
 
 impl Link {
-    /// A link for `<service>/<account>`, made at `made` with `token`.
+    /// A link for `<service>/<account>`, made at `made` with `token`, that
+    /// takes a submission for `lifetime`: [`LIFETIME`], but in a test.
     pub fn new(
         service: &str,
         account: &str,
@@ -103,15 +109,21 @@ impl Link {
         fields: Vec<Field>,
         token: Token,
         made: SystemTime,
+        lifetime: Duration,
     ) -> Link {
         Link {
             secret: format!("{service}/{account}"),
             description: description.map(String::from),
             fields,
             token,
-            expires: made + LIFETIME,
+            expires: made + lifetime,
             used: false,
         }
+    }
+
+    /// When it stops taking a submission.
+    pub fn expires(&self) -> SystemTime {
+        self.expires
     }
 
     /// The path the link serves: `/` and its token.

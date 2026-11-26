@@ -77,6 +77,23 @@ fn main() {
                     .join("\n")
             })
             .unwrap_or_default(),
+        // The certificate and key as PEM (`cert.pem`), or a failure (`cert.error`).
+        (tailscale::PROGRAM, w)
+            if w.len() == tailscale::CERT.len() + 1 && w.starts_with(tailscale::CERT) =>
+        {
+            match me["cert"]["pem"].as_str() {
+                Some(pem) => pem.to_string(),
+                None => {
+                    eprintln!(
+                        "{}",
+                        me["cert"]["error"]
+                            .as_str()
+                            .unwrap_or("Access denied: cert access denied")
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
         (tailscale::PROGRAM, w) if w == tailscale::STATUS => {
             json!({ "BackendState": "Running", tailscale::CERT_DOMAINS: me["cert_domains"] })
                 .to_string()

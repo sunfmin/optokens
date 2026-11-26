@@ -112,7 +112,7 @@ enum Cmd {
         #[arg(verbatim_doc_comment)]
         topic: Option<String>,
     },
-    /// Stores a Secret, or changes it: sets the Fields it names and keeps the rest.
+    /// Stores a Secret, or changes it: sets the Fields it names and keeps the rest. A value a person knows is entered on a one-time link it serves on the tailnet.
     ///
     /// ## When to run it
     ///
@@ -120,7 +120,19 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads the Secret from the vault, merges into it what this `put` names, and writes it back as one item, only when that changes it. `--set "NAME=value"` sets a Field that is not secret, split on the first `=`; repeat it. `--field-from-stdin <Label>` sets one Field to all of stdin, one trailing newline dropped: for a value a command makes and pipes in, such as `openssl rand -base64 32 | optokens put deploy-db --set "Username=svc" --field-from-stdin Password`. `--description` replaces the description. A new Secret is `static` unless `--kind profile`. A Profile's labels are environment variables' names, for `env`. How a Secret is laid out in the vault: [Secrets in the vault](help:secrets).
+    /// It reads the Secret from the vault, merges into it what this `put` names, and writes it back as one item, only when that changes it. A Field not named is kept. `--set "NAME=value"` sets a Field that is not secret, split on the first `=`; repeat it. `--field-from-stdin <Label>` sets one Field to all of stdin, one trailing newline dropped: for a value a command makes and pipes in, such as `openssl rand -base64 32 | optokens put deploy-db --set "Username=svc" --field-from-stdin Password`. `--description` replaces the description; alone, for a stored Secret, it changes nothing else. A new Secret is `static` unless `--kind profile`. A Profile's labels are environment variables' names, for `env`. How a Secret is laid out in the vault: [Secrets in the vault](help:secrets).
+    ///
+    /// ## The one-time link
+    ///
+    /// `--fields "<Label>,..."` names the Fields a person enters, and a bare `put <service>` (no `--set`, `--field-from-stdin` or `--fields`) the Secret's one value, with no label. For these `put` serves one page and waits:
+    ///
+    /// - **Where**: only on this host's tailnet address, from `tailscale ip`, on a port the OS picks. With no `tailscale`, or no tailnet address on this host, it stores nothing, reads no vault, and says what is missing.
+    /// - **How**: HTTPS, with the certificate `tailscale cert` gives for the host's tailnet name; when that fails, plain HTTP on the tailnet, which WireGuard encrypts, with the reason and its fix printed first.
+    /// - **For how long**: one submission, within {const:LINK_MINUTES} minutes; a link is a fresh random token.
+    /// - **What it prints**: on stderr, while it waits, `optokens: open this link to enter the secret for <service> / <account> (it works once, within {const:LINK_MINUTES} minutes):` and the URL on the next line. Hand that URL to the person: delivering it is not optokens' job. Stdout keeps only the final JSON answer.
+    /// - **The page**: the Secret, its description, a password input per Field asked (a plain text input for each `--show` label), and each stored Field this `put` keeps as "already set", never its value. A second submission, or one after expiry, answers 410.
+    ///
+    /// A value submitted goes from the page straight into `op`'s stdin, never to optokens' stdout or stderr, a log, a command line or a file. After the submission, or at expiry, `put` stops serving and answers.
     ///
     /// ## What it answers
     ///
@@ -135,13 +147,14 @@ enum Cmd {
     ///
     /// ## What it may refuse
     ///
-    /// Every fault it finds, before it writes anything: `bad_name`, `bad_set`, `duplicate_label`, `not_env_name`, `kind_change`, `shape_change`, `needs_link`, `stdin_terminal`, `stdin_empty`, `stdin_not_text`, the service account's faults ([the token and the vault](help:account)), and the vault's (`not_optokens`, `ambiguous`, `op_failed`). Each is in [Secrets in the vault](help:secrets), with its fix.
+    /// Every fault it finds, before it serves a link or writes anything: `bad_name`, `bad_set`, `bad_show`, `duplicate_label`, `not_env_name`, `kind_change`, `shape_change`, `stdin_terminal`, `stdin_empty`, `stdin_not_text`, the service account's faults ([the token and the vault](help:account)), and the vault's (`not_optokens`, `ambiguous`, `op_failed`); then `link_expired`, when no one submitted the link in time. Each is in [Secrets in the vault](help:secrets), with its fix. Without a tailnet to serve the link on, `tailscale_missing` or `no_tailnet_address`, as `optokens doctor --help` lists them, and a fault naming a tailnet address that is on no interface of this host.
     ///
     /// ## What trips you up
     ///
-    /// - A value a person knows is entered with `--fields` on a one-time link, which this optokens does not serve yet: `--fields`, `--show` and a bare `put <service>` are refused. Never pipe in, or `--set`, a value a person typed or pasted into the chat.
+    /// - `put --fields` or a bare `put` does not answer until the person submits the link, or it expires: run it where it may wait {const:LINK_MINUTES} minutes, and read the link from its stderr.
+    /// - Never pipe in, or `--set`, a value a person typed or pasted into the chat: give them the link.
     /// - `--set` puts its value on the command line, where `ps` shows it: only for a value that is not secret (a URL, a model, a user name).
-    /// - `put` never drops a Field, nor changes a kind or a single value into Fields: `rm`, then `put` the Secret again.
+    /// - `put` never drops a Field, nor changes a kind, nor turns a single value into Fields or back: `rm`, then `put` the Secret again.
     #[command(next_help_heading = "Run by the agent", verbatim_doc_comment)]
     Put(commands::PutArgs),
     /// Prints a Secret's value alone, with no newline, for `$(optokens get ...)`; or with `--json` the whole Secret.
@@ -328,6 +341,7 @@ pub(crate) fn help() -> Help {
         .constant("VALUES", item::VALUES)
         .constant("META", item::META)
         .constant("SINGLE", item::SINGLE)
+        .constant("LINK_MINUTES", crate::link::LIFETIME.as_secs() / 60)
         .constant("EXIT_OK", EXIT_OK)
         .constant("EXIT_ERROR", EXIT_ERROR)
 }
