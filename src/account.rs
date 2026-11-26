@@ -1,6 +1,6 @@
 //! Where optokens finds its 1Password service account: the token, and the
 //! vault. Every command that reaches 1Password calls [`token`] and [`vault`],
-//! and nothing else reads them.
+//! and nothing else reads them; `init` writes them with [`save`].
 
 use crate::access;
 use crate::refusal::{Refusal, quoted};
@@ -90,6 +90,15 @@ impl Source {
             Source::File(path) => path.display().to_string(),
         }
     }
+
+    /// `from`, `env` or `file`, and `at`, its [`Source::name`].
+    pub fn json(&self) -> serde_json::Value {
+        let from = match self {
+            Source::Env => "env",
+            Source::File(_) => "file",
+        };
+        serde_json::json!({ "from": from, "at": self.name() })
+    }
 }
 
 /// The service account's token. Its `Debug` hides the value.
@@ -148,6 +157,14 @@ pub fn token(env: &Env) -> Result<Token, Refusal> {
     })
 }
 
+/// The token and the vault, refused with every fault either has.
+pub fn find(env: &Env) -> Result<(Token, Vault), Vec<Refusal>> {
+    match (token(env), vault(env)) {
+        (Ok(token), Ok(vault)) => Ok((token, vault)),
+        (token, vault) => Err([token.err(), vault.err()].into_iter().flatten().collect()),
+    }
+}
+
 /// The vault optokens keeps its Secrets in, and the file that named it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Vault {
@@ -168,6 +185,78 @@ pub fn vault(env: &Env) -> Result<Vault, Refusal> {
             file: None,
         },
     })
+}
+
+/// Writes `token` into the token file and `vault` into the vault file, each
+/// replacing what was there: the config directory made with mode 0700, the
+/// token file only its owner may read. Each file is written whole under a
+/// fresh name in that directory, opened with `create_new`, then renamed over
+/// the old one, so a reader sees the old file or the new, never a part.
+pub fn save(env: &Env, token: &str, vault: &str) -> Result<(Token, Vault), Refusal> {
+    let dir = config_dir(env)?;
+    let token_file = dir.join(TOKEN_FILE);
+    let vault_file = dir.join(VAULT_FILE);
+    let cannot = |path: &Path, e: std::io::Error| {
+        Refusal::new(
+            format!("cannot write `{}`: {e}", path.display()),
+            format!(
+                "make {} a directory this user can write, then run `optokens init` again",
+                quoted(&dir)
+            ),
+        )
+    };
+    make_private_dir(&dir).map_err(|e| cannot(&dir, e))?;
+    replace(&token_file, token).map_err(|e| cannot(&token_file, e))?;
+    replace(&vault_file, vault).map_err(|e| cannot(&vault_file, e))?;
+    Ok((
+        Token {
+            value: token.to_string(),
+            source: Source::File(token_file),
+        },
+        Vault {
+            name: vault.to_string(),
+            file: Some(vault_file),
+        },
+    ))
+}
+
+#[cfg(unix)]
+fn make_private_dir(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)?;
+    // Exactly 0700 whatever the umask, and for a directory already there.
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+}
+
+#[cfg(not(unix))]
+fn make_private_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)
+}
+
+/// `path` replaced by `text` and a newline, in a file only its owner may
+/// read, made so before anything is written into it.
+fn replace(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let fresh = path.with_file_name(format!(".{name}.{}", crate::link::random_hex(8)));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let written = options.open(&fresh).and_then(|mut file| {
+        access::restrict(&file)?;
+        file.write_all(format!("{text}\n").as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&fresh, path)
+    });
+    if written.is_err() {
+        let _ = std::fs::remove_file(&fresh);
+    }
+    written
 }
 
 /// The trimmed text of `path`, `None` when there is no such file; with

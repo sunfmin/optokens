@@ -4,6 +4,7 @@
 use crate::account;
 use crate::commands;
 use crate::doctor::{self, Finding, World};
+use crate::init;
 use crate::item;
 use crate::refusal::Refusal;
 use crate::secret;
@@ -103,6 +104,51 @@ enum Cmd {
     /// - `cert` says the tailnet offers this host a certificate, not that this user may get it: on Linux `tailscale cert` needs root or the user set as the operator (`tailscale set --operator=$USER`).
     #[command(next_help_heading = "Run first, on a new host", verbatim_doc_comment)]
     Doctor,
+    /// Sets this host up: takes the 1Password service account's token on a one-time link, never in a terminal, writes it and the vault's name where every command finds them, and checks that the service account can read and write the vault.
+    ///
+    /// ## When to run it
+    ///
+    /// Once on a new host, after `optokens doctor` finds `op` and `tailscale`, and again to replace the token or change the vault. `init --check` alone, after a check failed and its grant was fixed, or to see that the stored token still reaches the vault.
+    ///
+    /// ## The one-time link
+    ///
+    /// It serves one page, as `put --fields` does (`optokens put --help`): only on this host's tailnet address, HTTPS when `tailscale cert` gives a certificate, for one submission within {const:LINK_MINUTES} minutes. On stderr, while it waits, `` optokens: open this link to enter the 1Password service account token for the vault `<vault>` (it works once, within {const:LINK_MINUTES} minutes): `` and the URL on the next line. Hand that URL to the person who holds the token. The page has one password input, "{const:INIT_LABEL}".
+    ///
+    /// ## What it writes
+    ///
+    /// - The token file, `{const:TOKEN_FILE}` in the config directory ([the token and the vault](help:account)), holding the token alone: mode 0600 on Unix; on Windows an access list granting only its owner, SYSTEM and the Administrators group, set before the token is written.
+    /// - The vault file, `{const:VAULT_FILE}` beside it, naming the vault (`--vault`, else `{const:DEFAULT_VAULT}`), only its owner may read too.
+    /// - The config directory, made with mode 0700 on Unix when it is not there, and set to 0700 when it is.
+    ///
+    /// Each file is written whole under a fresh name in that directory, then renamed over the old one: never a temporary file elsewhere. Run again, it replaces both: the same input gives the same files.
+    ///
+    /// ## What it checks
+    ///
+    /// With the new token, in `op`'s environment only, each in this order until one fails:
+    ///
+    /// {table:init}
+    ///
+    /// ## What it answers
+    ///
+    /// - `token`: `from` (`file`, or with `--check` maybe `env`) and `at`, the token file or the variable.
+    /// - `vault`: `name`, and `file`, the vault file (`null` with `--check` and no vault file).
+    /// - `checks`: the checks made, every one passed.
+    ///
+    /// ```json
+    /// { "token": { "from": "file", "at": "/home/ci/.config/optokens/token" }, "vault": { "name": "optokens", "file": "/home/ci/.config/optokens/vault" }, "checks": ["vault_listed", "vault_read", "probe_written", "probe_read_back", "probe_removed"] }
+    /// ```
+    ///
+    /// ## What it may refuse
+    ///
+    /// Before it serves the link: a `--vault` that is empty or not one line, `no_config_dir` ([the token and the vault](help:account)), and without a tailnet to serve the link on, `tailscale_missing` or `no_tailnet_address` (`optokens doctor --help`). Then `link_expired`, when no one submitted the link in time, and nothing is written. Then the first check that failed, its `kind` the check's name and its fix the grant to give. The token file and the vault file are then kept: once the grant is given, `optokens init --check` checks again with no new link. `--check` refuses also with the service account's faults ([the token and the vault](help:account)).
+    ///
+    /// ## What trips you up
+    ///
+    /// - It does not answer until the person submits the link, or it expires: run it where it may wait {const:LINK_MINUTES} minutes, and read the link from its stderr.
+    /// - Never ask for the token in the chat, nor pipe it in: give the person the link.
+    /// - `{const:TOKEN_ENV}`, when set, wins over the token file it writes: unset it for later commands to use the file.
+    #[command(next_help_heading = "Run first, on a new host", verbatim_doc_comment)]
+    Init(init::InitArgs),
     /// Shows one topic of this manual, or all of it.
     ///
     /// `optokens help account` shows where optokens finds the service account's token and the vault; `optokens help all` shows the whole manual.
@@ -331,6 +377,8 @@ pub(crate) fn help() -> Help {
         .table::<account::Fault>("account")
         .table::<Finding>("doctor")
         .table::<secret::Fault>("secret")
+        .table::<init::Check>("init")
+        .constant("INIT_LABEL", init::LABEL)
         .constant("BOUND", format!("{}s", doctor::BOUND.as_secs()))
         .constant("TOKEN_ENV", account::TOKEN_ENV)
         .constant("TOKEN_FILE", account::TOKEN_FILE)
@@ -422,6 +470,7 @@ pub(crate) fn run(args: impl IntoIterator<Item = std::ffi::OsString>) -> Answer 
     let env = account::Env::current();
     match cli.command {
         Cmd::Doctor => Answer::json(&doctor::doctor(&World::current())),
+        Cmd::Init(args) => init::init(&env, args),
         Cmd::Help { topic: None } => Answer::text(help.index().expect("checked")),
         Cmd::Help { topic: Some(topic) } => match help.topic_help(&topic) {
             Ok(markdown) => Answer::text(markdown),

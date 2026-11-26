@@ -2,7 +2,7 @@
 //! the service account's token and vault, `op` and `tailscale`, changes
 //! nothing, and answers each finding with its fix.
 
-use crate::account::{self, Env, Source};
+use crate::account::{self, Env};
 use crate::op;
 use crate::program::{self, Ran};
 use crate::refusal::Refusal;
@@ -68,10 +68,7 @@ pub fn doctor(world: &World) -> Value {
     let mut findings = Vec::new();
     let op = check_op(world, &mut findings);
     let token = match account::token(&world.env) {
-        Ok(token) => json!({ "from": match &token.source {
-            Source::Env => "env",
-            Source::File(_) => "file",
-        }, "at": token.source.name() }),
+        Ok(token) => token.source.json(),
         Err(refusal) => {
             findings.push(refusal);
             Value::Null

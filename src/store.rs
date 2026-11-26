@@ -31,13 +31,24 @@ impl Store {
     /// The service account's vault, refused with every fault the token and
     /// the vault file have.
     pub fn open(env: &Env) -> Result<Store, Vec<Refusal>> {
-        match (account::token(env), account::vault(env)) {
-            (Ok(token), Ok(vault)) => Ok(Store {
-                token,
-                vault: vault.name,
-            }),
-            (token, vault) => Err([token.err(), vault.err()].into_iter().flatten().collect()),
-        }
+        let (token, vault) = account::find(env)?;
+        Ok(Store::new(token, vault.name))
+    }
+
+    /// The vault `vault`, reached with `token`: `init`'s, before any lookup.
+    pub fn new(token: Token, vault: String) -> Store {
+        Store { token, vault }
+    }
+
+    pub fn vault(&self) -> &str {
+        &self.vault
+    }
+
+    /// Whether `op vault list` shows the vault to the service account.
+    pub fn has_vault(&self) -> Result<bool, Refusal> {
+        let list = self.json(Call::Vaults)?;
+        let named = |v: &Value| v["name"] == self.vault.as_str();
+        Ok(list.as_array().is_some_and(|all| all.iter().any(named)))
     }
 
     /// `call`'s stdout, `input` on its stdin.
