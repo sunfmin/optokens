@@ -1,0 +1,39 @@
+{
+  "tree": "c6955e5b465fb66afc50fefa9c06f62e740db819+f9a8775516e1a51d",
+  "picker": "codex:01a21a12-f379-74e1-9cbd-85b8f830ee19:default",
+  "author": "claude-code:be6e4847-3c20-5a80-b0b5-7f82bb49603c:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/item.rs:262:24: replace == with != in current",
+        "why": "The stale fixtures change the title, so they may miss that unrelated metadata fields can satisfy both name-field checks.",
+        "outcome": "killed",
+        "first_outcome": "survived"
+      },
+      {
+        "name": "src/item.rs:262:89: replace == with != in current",
+        "why": "An item whose fields identify the metadata section only by ID could be rewritten on every unchanged put.",
+        "outcome": "killed",
+        "first_outcome": "survived"
+      },
+      {
+        "name": "src/item.rs:262:59: replace == with != in current",
+        "why": "A current item with the correct section label and an opaque section ID could be misclassified as stale.",
+        "outcome": "killed",
+        "first_outcome": "survived"
+      },
+      {
+        "name": "src/secret.rs:365:9: delete match arm (Some(Values::Single(_)), false, _) in merge",
+        "why": "The migration tests use labelled fields, leaving open whether a put that adds fields to an existing single value still refuses the shape change.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  },
+  "removed_tests": {
+    "rust": [
+      "src/item.rs:386: find_takes_the_one_tagged_item_and_refuses_a_stranger_or_two"
+    ]
+  },
+  "added_lines": 99
+}

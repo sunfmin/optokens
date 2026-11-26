@@ -468,6 +468,38 @@ mod tests {
     }
 
     #[test]
+    fn current_reads_the_name_only_from_the_section_named_optokens_by_its_label_or_id() {
+        let (name, secret) = secret();
+        let item = stored(&template(&name, &secret));
+        let with_sections = |section: Value, meta: &[&str]| {
+            let mut item = item.clone();
+            for f in item["fields"].as_array_mut().unwrap() {
+                if meta.contains(&f["label"].as_str().unwrap()) {
+                    f["section"] = section.clone();
+                }
+            }
+            item
+        };
+        let name_fields = [SERVICE, ACCOUNT];
+        assert!(
+            current(
+                &with_sections(json!({ "id": "x7k2", "label": META }), &name_fields),
+                &name
+            ),
+            "a section `optokens` by its label, its id opaque, holds the name"
+        );
+        assert!(
+            current(&with_sections(json!({ "id": META }), &name_fields), &name),
+            "a section `optokens` by its id alone holds the name"
+        );
+        let elsewhere = json!({ "id": VALUES, "label": VALUES });
+        assert!(
+            !current(&with_sections(elsewhere, &name_fields), &name),
+            "Fields `service` and `account` among the values are no name, whatever else the section `optokens` holds"
+        );
+    }
+
+    #[test]
     fn candidates_are_the_tagged_items_of_either_title_and_a_stranger_is_refused() {
         let name = Name::new("aws", "ci").unwrap();
         let item =
