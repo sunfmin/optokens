@@ -13,8 +13,9 @@ pub const VERSION: &[&str] = &["--version"];
 /// only way optokens hands it the token.
 pub const TOKEN_ENV: &str = "OP_SERVICE_ACCOUNT_TOKEN";
 
-/// `op item <verb>`.
+/// `op item <verb>`, and `op vault list`.
 pub const ITEM: &str = "item";
+pub const VAULT: &str = "vault";
 pub const LIST: &str = "list";
 pub const GET: &str = "get";
 pub const CREATE: &str = "create";
@@ -26,6 +27,8 @@ pub const STDIN: &str = "-";
 /// One call of `op`, before it is a command line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Call<'a> {
+    /// Every vault the service account can see, by name.
+    Vaults,
     /// Every item's summary in the vault, without values.
     List,
     /// One item, its values with it.
@@ -42,6 +45,7 @@ pub enum Call<'a> {
 pub fn args(call: Call, vault: &str) -> Vec<String> {
     let json = ["--format", "json"];
     let (verb, item, tail): (&str, Option<&str>, &[&str]) = match call {
+        Call::Vaults => return [VAULT, LIST, "--format", "json"].map(String::from).to_vec(),
         Call::List => (LIST, None, &json),
         Call::Get(id) => (GET, Some(id), &json),
         Call::Create => (CREATE, None, &["--format", "json", STDIN]),
@@ -62,6 +66,7 @@ mod tests {
     #[test]
     fn each_call_is_an_item_command_in_the_vault_with_no_value() {
         let line = |call| args(call, "team").join(" ");
+        assert_eq!(line(Call::Vaults), "vault list --format json");
         assert_eq!(line(Call::List), "item list --vault team --format json");
         assert_eq!(
             line(Call::Get("id1")),

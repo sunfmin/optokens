@@ -8,7 +8,7 @@ use crate::doctor::{no_tailnet_address, tailscale_missing};
 use crate::link::{self, Link, Request, Response, Scheme, Values};
 use crate::program;
 use crate::refusal::Refusal;
-use crate::secret::{Fault, Name};
+use crate::secret::Fault;
 use crate::tailscale;
 use rustls::ServerConfig;
 use rustls::pki_types::pem::PemObject;
@@ -54,11 +54,12 @@ impl Endpoint {
         })
     }
 
-    /// Serves `link` for `name` until its one submission, which it answers,
-    /// or its expiry, refused as `link_expired`. It prints the link on stderr
-    /// first, with why it is plain HTTP when it is. Later requests are
+    /// Serves `link` until its one submission, which it answers, or its
+    /// expiry, refused as `link_expired` with the fix of running `command`
+    /// again. It prints the link on stderr first, saying it is to enter
+    /// `what`, with why it is plain HTTP when it is. Later requests are
     /// answered "already used" until optokens exits.
-    pub fn serve(self, name: &Name, link: Link) -> Result<Values, Refusal> {
+    pub fn serve(self, link: Link, what: &str, command: &str) -> Result<Values, Refusal> {
         let address = self.listener.local_addr().map_err(io_refusal)?;
         let port = address.port();
         let (url, tls) = match link::scheme(certificate(&self.tailscale), &user()) {
@@ -72,12 +73,11 @@ impl Endpoint {
             }
         };
         eprintln!(
-            "optokens: open this link to enter the secret for {} / {} (it works once, within {} minutes):\n{url}",
-            name.service(),
-            name.account(),
+            "optokens: open this link to enter {what} (it works once, within {} minutes):\n{url}",
             link::LIFETIME.as_secs() / 60
         );
         let expires = link.expires();
+        let title = link.title().to_string();
         let (sent, values) = mpsc::channel();
         let link = Arc::new(Mutex::new(link));
         let listener = self.listener;
@@ -102,10 +102,9 @@ impl Endpoint {
                 Refusal::of(
                     &Fault::LinkExpired,
                     format!(
-                        "no value was submitted on the one-time link for `{}` before it expired, so nothing was stored",
-                        name.title()
+                        "no value was submitted on the one-time link for `{title}` before it expired, so nothing was stored"
                     ),
-                    "run the same `optokens put` again, and open its new link sooner",
+                    format!("run the same `optokens {command}` again, and open its new link sooner"),
                 )
             })
     }
@@ -338,8 +337,7 @@ mod tests {
     #[test]
     fn each_answer_has_its_status_line_and_closes() {
         let link = Mutex::new(Link::new(
-            "svc",
-            "default",
+            "svc/default",
             None,
             Vec::new(),
             link::Token::fresh(),

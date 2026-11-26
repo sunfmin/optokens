@@ -25,7 +25,7 @@ pub enum Fault {
     ShapeChange,
     /// `--show` names a label `--fields` does not, or is given without `--fields`. Fix: name each `--show` label in `--fields` too.
     BadShow,
-    /// No value was submitted on the one-time link before it expired, so nothing was stored. Fix: run the same `put` again, and open its new link sooner.
+    /// No value was submitted on the one-time link before it expired, so nothing was stored. Fix: run the same `put` or `init` again, and open its new link sooner.
     LinkExpired,
     /// `--field-from-stdin` was given, but stdin is a terminal: a person would type into a prompt that shows nothing. Fix: pipe the value a command makes into `put`; a value a person knows waits for the one-time link.
     StdinTerminal,

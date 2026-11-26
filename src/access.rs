@@ -1,5 +1,5 @@
 //! Whether only its owner may read a file: the one check, by operating
-//! system, behind `private`.
+//! system, behind `private`; and [`restrict`], which makes a file so.
 
 use crate::account::Fault;
 use crate::refusal::Refusal;
@@ -34,6 +34,25 @@ pub fn private(file: &File, _meta: &Metadata, path: &Path) -> Result<(), Refusal
 
 #[cfg(not(any(unix, windows)))]
 pub fn private(_file: &File, _meta: &Metadata, _path: &Path) -> Result<(), Refusal> {
+    Ok(())
+}
+
+/// Makes `file` readable by its owner alone, as [`private`] judges it: on
+/// Unix mode 0600; on Windows a protected access list granting only its
+/// owner, SYSTEM and the Administrators group.
+#[cfg(unix)]
+pub fn restrict(file: &File) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+}
+
+#[cfg(windows)]
+pub fn restrict(file: &File) -> std::io::Result<()> {
+    windows::restrict(file).map_err(std::io::Error::other)
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn restrict(_file: &File) -> std::io::Result<()> {
     Ok(())
 }
 
@@ -117,11 +136,13 @@ mod windows {
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::{ERROR_SUCCESS, LocalFree};
     use windows_sys::Win32::Security::Authorization::{
-        ConvertSidToStringSidW, GetSecurityInfo, SE_FILE_OBJECT,
+        ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+        GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT, SetSecurityInfo,
     };
     use windows_sys::Win32::Security::{
         ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, EqualSid, GetAce,
-        IsWellKnownSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+        GetSecurityDescriptorDacl, IsWellKnownSid, OWNER_SECURITY_INFORMATION,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
         WinBuiltinAdministratorsSid, WinLocalSystemSid,
     };
 
@@ -195,6 +216,68 @@ mod windows {
             });
         }
         Ok(Some(entries))
+    }
+
+    /// Replaces `file`'s access list by a protected one (nothing inherited)
+    /// granting full control to its owner, SYSTEM and the Administrators group.
+    pub fn restrict(file: &File) -> Result<(), String> {
+        let (mut owner, mut sd): (PSID, PSECURITY_DESCRIPTOR) = (null_mut(), null_mut());
+        // SAFETY: a valid open handle; the out pointers are written by the call.
+        let status = unsafe {
+            GetSecurityInfo(
+                file.as_raw_handle() as _,
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION,
+                &mut owner,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                &mut sd,
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return Err(format!("GetSecurityInfo failed with error {status}"));
+        }
+        let _owned = Descriptor(sd);
+        // `owner` points into `sd`, alive until `_owned` drops.
+        let sddl = format!("D:P(A;;FA;;;{})(A;;FA;;;SY)(A;;FA;;;BA)", sid_string(owner));
+        let wide: Vec<u16> = sddl.encode_utf16().chain([0]).collect();
+        let mut built: PSECURITY_DESCRIPTOR = null_mut();
+        // SAFETY: a NUL-terminated wide string; the call allocates `built`, freed by `_built`.
+        if unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                wide.as_ptr(),
+                SDDL_REVISION_1,
+                &mut built,
+                null_mut(),
+            )
+        } == 0
+        {
+            return Err(format!("the access list `{sddl}` does not parse"));
+        }
+        let _built = Descriptor(built);
+        let (mut present, mut defaulted, mut dacl) = (0, 0, null_mut());
+        // SAFETY: `built` is a valid descriptor; the out pointers are written by the call.
+        if unsafe { GetSecurityDescriptorDacl(built, &mut present, &mut dacl, &mut defaulted) } == 0
+        {
+            return Err("GetSecurityDescriptorDacl failed".to_string());
+        }
+        // SAFETY: a valid open handle and the list inside `built`.
+        let status = unsafe {
+            SetSecurityInfo(
+                file.as_raw_handle() as _,
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                null_mut(),
+                null_mut(),
+                dacl,
+                null_mut(),
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return Err(format!("SetSecurityInfo failed with error {status}"));
+        }
+        Ok(())
     }
 
     fn sid_string(sid: PSID) -> String {

@@ -21,10 +21,15 @@ pub struct Token(String);
 
 impl Token {
     pub fn fresh() -> Token {
-        let mut bytes = [0u8; 16];
-        getrandom::fill(&mut bytes).expect("the OS gives no random bytes");
-        Token(bytes.iter().map(|b| format!("{b:02x}")).collect())
+        Token(random_hex(16))
     }
+}
+
+/// `bytes` bytes from the OS's CSPRNG, as lowercase hex digits.
+pub fn random_hex(bytes: usize) -> String {
+    let mut random = vec![0u8; bytes];
+    getrandom::fill(&mut random).expect("the OS gives no random bytes");
+    random.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// A Field of the Secret, as the page shows it.
@@ -87,11 +92,11 @@ impl Response {
 /// A submission: each asked Field's label and the value entered for it.
 pub type Values = BTreeMap<String, String>;
 
-/// One Secret's one-time link.
+/// One-time link for what one command asks: a Secret's Fields, or `init`'s token.
 #[derive(Debug)]
 pub struct Link {
-    /// `<service>/<account>`.
-    secret: String,
+    /// What the page is for: a Secret's `<service>/<account>`.
+    title: String,
     description: Option<String>,
     fields: Vec<Field>,
     token: Token,
@@ -100,11 +105,11 @@ pub struct Link {
 }
 
 impl Link {
-    /// A link for `<service>/<account>`, made at `made` with `token`, that
-    /// takes a submission for `lifetime`: [`LIFETIME`], but in a test.
+    /// A link titled `title` (a Secret's `<service>/<account>`), made at
+    /// `made` with `token`, that takes a submission for `lifetime`:
+    /// [`LIFETIME`], but in a test.
     pub fn new(
-        service: &str,
-        account: &str,
+        title: &str,
         description: Option<&str>,
         fields: Vec<Field>,
         token: Token,
@@ -112,13 +117,17 @@ impl Link {
         lifetime: Duration,
     ) -> Link {
         Link {
-            secret: format!("{service}/{account}"),
+            title: title.to_string(),
             description: description.map(String::from),
             fields,
             token,
             expires: made + lifetime,
             used: false,
         }
+    }
+
+    pub fn title(&self) -> &str {
+        &self.title
     }
 
     /// When it stops taking a submission.

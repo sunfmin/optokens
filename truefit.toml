@@ -59,8 +59,7 @@ check = ["test"]
 name = "a-person-enters-on-a-link"
 says = "`put --fields` and `init` print a one-time link and wait for its one submission, departing from agent-cli's \"never ask\": the owner's spec makes the link the way in for a secret a person knows, and there is no popup or terminal prompt to fall back on."
 source = "docs/adr/0007-a-person-enters-a-value-on-a-one-time-link.md:5"
-kept = "init is not built yet; put's half is checked by tests/link.rs"
-kept_until = "2027-02-28"
+check = ["test"]
 
 [[promise]]
 name = "no-value-in-argv-or-temp-file-invariant"
@@ -110,8 +109,7 @@ check = ["test"]
 name = "link-lifetime-in-help"
 says = "The help of `put` and `init` says it from that constant too."
 source = "docs/adr/0008-the-one-time-links-rules.md:15"
-kept = "init is not built yet; put's help is checked by tests/binary.rs"
-kept_until = "2027-02-28"
+check = ["test"]
 
 [[promise]]
 name = "link-refusals"

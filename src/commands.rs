@@ -133,7 +133,8 @@ fn put_secret(
     let mut merged = secret::merge(&name, existing, &put)?;
     if let Some(endpoint) = endpoint {
         let link = link_for(&name, existing, &put, &asked, &shown);
-        let mut values = endpoint.serve(&name, link).map_err(|r| vec![r])?;
+        let what = format!("the secret for {} / {}", name.service(), name.account());
+        let mut values = endpoint.serve(link, &what, "put").map_err(|r| vec![r])?;
         match &mut merged.values {
             secret::Values::Single(value) => {
                 *value = values.pop_first().map(|(_, v)| v).unwrap_or_default()
@@ -200,17 +201,22 @@ fn link_for(
             .chain(kept)
             .collect()
     };
-    let lifetime = std::env::var(TEST_LIFETIME)
-        .ok()
-        .and_then(|ms| ms.parse().ok())
-        .map_or(link::LIFETIME, Duration::from_millis);
     let description = put
         .description
         .as_deref()
         .or_else(|| existing.and_then(|e| e.description.as_deref()));
+    fresh_link(&name.title(), description, fields)
+}
+
+/// A link made now, with a fresh token, for [`link::LIFETIME`] (a test's
+/// `OPTOKENS_TEST_LINK_LIFETIME_MS` shortens it).
+pub fn fresh_link(title: &str, description: Option<&str>, fields: Vec<link::Field>) -> Link {
+    let lifetime = std::env::var(TEST_LIFETIME)
+        .ok()
+        .and_then(|ms| ms.parse().ok())
+        .map_or(link::LIFETIME, Duration::from_millis);
     Link::new(
-        name.service(),
-        name.account(),
+        title,
         description,
         fields,
         Token::fresh(),

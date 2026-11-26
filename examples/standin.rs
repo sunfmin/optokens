@@ -63,7 +63,26 @@ fn main() {
         (op::PROGRAM, w) if w == op::VERSION => {
             me["version"].as_str().unwrap_or("2.30.0").to_string()
         }
+        // The vaults the service account sees: `op.vaults`, else `optokens`.
+        (op::PROGRAM, [op::VAULT, op::LIST, ..]) => {
+            signed_in(&me);
+            let names = me["vaults"].as_array().cloned();
+            let names = names.unwrap_or_else(|| vec![json!("optokens")]);
+            let vaults: Vec<Value> = names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| json!({ "id": format!("v{i}"), "name": n }))
+                .collect();
+            json!(vaults).to_string()
+        }
         (op::PROGRAM, [op::ITEM, ..]) => {
+            signed_in(&me);
+            if let (Some(vaults), Some(vault)) = (me["vaults"].as_array(), flag(&words, "--vault"))
+                && !vaults.iter().any(|v| v == vault)
+            {
+                eprintln!("[ERROR] \"{vault}\" isn't a vault in this account.");
+                std::process::exit(1);
+            }
             let answer = item(&mut state, &words[1..]);
             save(&state);
             answer
@@ -103,6 +122,23 @@ fn main() {
     println!("{answer}");
 }
 
+/// With `op.token` set, `op` refuses any other token in its environment, as
+/// 1Password refuses a token it did not issue.
+fn signed_in(me: &Value) {
+    if let Some(token) = me["token"].as_str()
+        && std::env::var(op::TOKEN_ENV).ok().as_deref() != Some(token)
+    {
+        eprintln!("[ERROR] invalid service account token");
+        std::process::exit(1);
+    }
+}
+
+/// The word after `name` in `words`.
+fn flag<'a>(words: &[&'a str], name: &str) -> Option<&'a str> {
+    let at = words.iter().position(|w| *w == name)?;
+    words.get(at + 1).copied()
+}
+
 fn unknown(program: &str, args: &[String]) -> ! {
     // As the real CLI does with what it does not take.
     eprintln!("{program}: unknown command {args:?}");
@@ -137,14 +173,9 @@ fn walk(dir: &Path, files: &mut Vec<Value>) {
 
 /// `op item ...` against the items in `state.op.items`, as `op` keeps them.
 fn item(state: &mut Value, words: &[&str]) -> String {
-    let flag = |name: &str| {
-        words
-            .iter()
-            .position(|w| *w == name)
-            .and_then(|i| words.get(i + 1))
-            .map(|s| s.to_string())
-    };
-    let vault = flag("--vault").expect("every item call names the vault");
+    let vault = flag(words, "--vault")
+        .expect("every item call names the vault")
+        .to_string();
     let missing = |id: &str| -> ! {
         eprintln!("[ERROR] \"{id}\" isn't an item in the \"{vault}\" vault.");
         std::process::exit(1)

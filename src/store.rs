@@ -40,6 +40,26 @@ impl Store {
         }
     }
 
+    /// The vault `vault`, reached with `token`: `init`'s, before any lookup.
+    pub fn new(token: Token, vault: String) -> Store {
+        Store { token, vault }
+    }
+
+    pub fn vault(&self) -> &str {
+        &self.vault
+    }
+
+    /// The names of every vault the service account can see.
+    pub fn vaults(&self) -> Result<Vec<String>, Refusal> {
+        let list = self.json(Call::Vaults)?;
+        Ok(list
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v["name"].as_str().map(String::from))
+            .collect())
+    }
+
     /// `call`'s stdout, `input` on its stdin.
     fn run(&self, call: Call, input: Option<Vec<u8>>) -> Result<String, Refusal> {
         let args = op::args(call, &self.vault);
