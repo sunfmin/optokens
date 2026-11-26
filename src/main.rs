@@ -7,6 +7,9 @@ mod cli;
 mod commands;
 mod doctor;
 mod item;
+// The one-time link's rules; put and init, not built yet, serve them.
+#[cfg_attr(not(test), allow(dead_code, unused_imports))]
+mod link;
 mod op;
 mod program;
 mod refusal;

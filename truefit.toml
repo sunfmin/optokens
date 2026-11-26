@@ -71,17 +71,68 @@ check = ["test"]
 [[promise]]
 name = "item-read-back-exactly"
 says = "Reading an item back gives exactly the Secret that was stored."
-source = "docs/adr/0008-one-item-per-secret-metadata-in-its-own-section.md:7"
+source = "docs/adr/0009-one-item-per-secret-metadata-in-its-own-section.md:7"
 check = ["test"]
 
 [[promise]]
 name = "foreign-item-refused"
 says = "An item without the `optokens` tag, or whose `optokens` section is not this shape, is refused by name, never guessed at."
-source = "docs/adr/0008-one-item-per-secret-metadata-in-its-own-section.md:7"
+source = "docs/adr/0009-one-item-per-secret-metadata-in-its-own-section.md:7"
 check = ["test"]
 
 [[promise]]
 name = "label-never-collides-with-metadata"
 says = "Metadata in a section of its own: chosen, because a user's Field may be called `kind` or `description` (a Profile's environment variable); in its own section a label never collides with it."
-source = "docs/adr/0008-one-item-per-secret-metadata-in-its-own-section.md:13"
+source = "docs/adr/0009-one-item-per-secret-metadata-in-its-own-section.md:13"
+check = ["test"]
+
+# The one-time link's rules (ADR 0008), each kept by the tests of src/link/tests.rs.
+
+[[promise]]
+name = "link-token"
+says = "A link's token is 128 bits from the OS's CSPRNG, written as 32 lowercase hex digits, and is the whole of its path; a request's path is compared with it in constant time."
+source = "docs/adr/0008-the-one-time-links-rules.md:11"
+check = ["test"]
+
+[[promise]]
+name = "link-one-submission"
+says = "The first complete POST with the right token before expiry gives back the values, and no request after it does: each answers 410, \"This link was already used.\""
+source = "docs/adr/0008-the-one-time-links-rules.md:13"
+check = ["test"]
+
+[[promise]]
+name = "link-expires-in-ten-minutes"
+says = "A link expires 10 minutes after it is made, one constant that the code and the page say; from then on each request answers 410, \"This link expired. Nothing was stored.\""
+source = "docs/adr/0008-the-one-time-links-rules.md:15"
+check = ["test"]
+
+[[promise]]
+name = "link-lifetime-in-help"
+says = "The help of `put` and `init` says it from that constant too."
+source = "docs/adr/0008-the-one-time-links-rules.md:15"
+kept = "put and init are not built yet; their help test checks it"
+kept_until = "2027-02-28"
+
+[[promise]]
+name = "link-refusals"
+says = "A wrong path answers 404 and a method other than GET or POST 405; a POST with an empty field answers the form again, 400, with \"Every field needs a value.\""
+source = "docs/adr/0008-the-one-time-links-rules.md:17"
+check = ["test"]
+
+[[promise]]
+name = "link-page"
+says = "The page names the Secret (`<service>/<account>`) and its Description, and has one input per Field it asks for: plain text for a `--show` Field, a password input for the rest; a Field already set shows only \"already set\", its value never on the page, and every piece of text on it is HTML-escaped."
+source = "docs/adr/0008-the-one-time-links-rules.md:19"
+check = ["test"]
+
+[[promise]]
+name = "link-tailnet-only"
+says = "The link listens only on the tailnet address `tailscale ip` names that is on one of this host's interfaces; with no `tailscale` or no such address it stores nothing, and its refusal names what is missing."
+source = "docs/adr/0008-the-one-time-links-rules.md:21"
+check = ["test"]
+
+[[promise]]
+name = "link-https-or-http-with-why"
+says = "With a certificate from `tailscale cert` the link is HTTPS; when `tailscale cert` fails it is plain HTTP on the tailnet, and the reason printed with it gives the error and the fix: an admin runs `sudo tailscale set --operator=<user>`, and HTTPS Certificates are on for the tailnet."
+source = "docs/adr/0008-the-one-time-links-rules.md:23"
 check = ["test"]

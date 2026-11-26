@@ -11,15 +11,15 @@
     "source": "docs/adr/0007-a-person-enters-a-value-on-a-one-time-link.md:3",
     "why": "the owner's words quoted as the decision's source; the promises they make are registered from the ADR's own sentences"
   },
+  "340fd3aa7e3f": {
+    "mark": "promise",
+    "sentence": "The link listens only on the tailnet address `tailscale ip` names that is on one of this host's interfaces; with no `tailscale` or no such address it stores nothing, and its refusal names what is missing.",
+    "source": "docs/adr/0008-the-one-time-links-rules.md:21"
+  },
   "4bb5ad4cd9a9": {
     "mark": "not",
     "sentence": "`optokens --help` is the manual and its only copy; keep it true whenever behaviour changes.",
     "source": "CLAUDE.md:3"
-  },
-  "69eebc175572": {
-    "mark": "promise",
-    "sentence": "Metadata in a section of its own: chosen, because a user's Field may be called `kind` or `description` (a Profile's environment variable); in its own section a label never collides with it.",
-    "source": "docs/adr/0008-one-item-per-secret-metadata-in-its-own-section.md:13"
   },
   "756bd25d8a81": {
     "mark": "promise",
@@ -30,6 +30,11 @@
     "mark": "promise",
     "sentence": "`put --fields` and `init` print a one-time link and wait for its one submission, departing from agent-cli's \"never ask\": the owner's spec makes the link the way in for a secret a person knows, and there is no popup or terminal prompt to fall back on.",
     "source": "docs/adr/0007-a-person-enters-a-value-on-a-one-time-link.md:5"
+  },
+  "804fb0721590": {
+    "mark": "promise",
+    "sentence": "A wrong path answers 404 and a method other than GET or POST 405; a POST with an empty field answers the form again, 400, with \"Every field needs a value.\"",
+    "source": "docs/adr/0008-the-one-time-links-rules.md:17"
   },
   "9aa804054b37": {
     "mark": "promise",
@@ -59,8 +64,13 @@
   "db45976686a7": {
     "mark": "not",
     "sentence": "Decided by the tech lead for Felix, when this storage was planned: 「Chose: a section of its own, because a user Field may be called `kind` or `description` (a Profile's env var); keeping metadata in its own section means a label never collides with it.」",
-    "source": "docs/adr/0008-one-item-per-secret-metadata-in-its-own-section.md:3",
+    "source": "docs/adr/0009-one-item-per-secret-metadata-in-its-own-section.md:3",
     "why": "the decision's quoted source; the same promise is registered from line 13 as label-never-collides-with-metadata"
+  },
+  "ed3cdea1b429": {
+    "mark": "promise",
+    "sentence": "The page names the Secret (`<service>/<account>`) and its Description, and has one input per Field it asks for: plain text for a `--show` Field, a password input for the rest; a Field already set shows only \"already set\", its value never on the page, and every piece of text on it is HTML-escaped.",
+    "source": "docs/adr/0008-the-one-time-links-rules.md:19"
   },
   "f1ddb985d2b9": {
     "mark": "promise",
@@ -77,5 +87,11 @@
     "mark": "promise",
     "sentence": "Every command prints one JSON object on stdout; a failure is `{\"error\": …}` with a non-zero exit.",
     "source": "docs/adr/0001-one-json-object-but-get-and-env.md:5"
+  },
+  "fdac7c74a0d1": {
+    "mark": "not",
+    "sentence": "Listen on every interface and check the client's address.",
+    "source": "docs/adr/0008-the-one-time-links-rules.md:27",
+    "why": "an option the ADR weighed and rejected, not what optokens does"
   }
 }
