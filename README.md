@@ -7,3 +7,5 @@ Install on macOS or Linux with `brew install sunfmin/tap/optokens`, which instal
 The manual is `optokens --help`, and it is the only copy.
 
 Build and check: `./gate.sh`.
+
+End to end, against a real 1Password vault and the real `op` (outside the gate: it needs the network and a token): `scripts/e2e.sh <mytokens-profile> [vault]`. The Profile holds `OP_SERVICE_ACCOUNT_TOKEN` for the vault, `sesame-scratch` unless named; the script refuses unless optokens resolves that vault, writes only `e2e-<n>/default`, and removes it on any exit.
