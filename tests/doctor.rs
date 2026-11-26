@@ -62,6 +62,8 @@ impl Host {
         let out = Command::new(env!("CARGO_BIN_EXE_optokens"))
             .arg("doctor")
             .env_clear()
+            // A coverage run's profile path: without it the run writes `default_*.profraw` here and counts none of it.
+            .envs(std::env::var_os("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
             .env("PATH", self.dir.path().join("bin"))
             .env("HOME", self.dir.path().join("home"))
             .env("OPTOKENS_STANDIN_STATE", self.state_file())
