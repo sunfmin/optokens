@@ -1,7 +1,8 @@
 #!/bin/sh
 # The end-to-end check against a real 1Password vault and the real `op`:
 # put (a Meta among it) -> list -> get -> env -> put again (upsert) -> `op read op://` -> a put over the item retitled as
-# an earlier optokens titled it -> a put of two pipes -> a put over mytokens' tags and section -> rm, each answer checked, the item and its field
+# an earlier optokens titled it -> a put over the Description in the section, as before the notes -> a put of two pipes
+# -> a put over mytokens' tags and section -> put --description "" -> rm, each answer checked, the item and its field
 # types checked in the vault through `op item get`, and `ps` sampled during the put for the value. Outside the gate: it needs the network and a token.
 #
 #   scripts/e2e.sh <mytokens-profile> [vault]
@@ -69,7 +70,7 @@ types() { # <when>
     map=$(printf '%s' "$item" | jq -c '[.fields[] | select(.section) | {(.section.label + "." + .label): .type}] | add')
     echo "$map"
     check "types $1: A STRING, TOKEN CONCEALED, metadata STRING" \
-        '. == {"fields.A":"STRING","fields.TOKEN":"CONCEALED","optokens.service":"STRING","optokens.account":"STRING","optokens.kind":"STRING","optokens.shape":"STRING","optokens.description":"STRING","optokens.meta":"STRING"}' "$map"
+        '. == {"fields.A":"STRING","fields.TOKEN":"CONCEALED","optokens.service":"STRING","optokens.account":"STRING","optokens.kind":"STRING","optokens.shape":"STRING","optokens.meta":"STRING"}' "$map"
 }
 
 # ps sampled in a loop for as long as the put runs: the value must never show.
@@ -107,10 +108,17 @@ printf '%s' "$item" | jq -c '{title, category, tags, sections: [.sections[]? | .
 check "the item is titled, tagged, a secure note" '.title == "'"$title"'" and .category == "SECURE_NOTE" and (.tags | index("optokens"))' "$item"
 check "values in section fields, metadata in section optokens" '
   [.fields[] | select(.section) | [.section.label, .label]] | sort
-  == [["fields","A"],["fields","TOKEN"],["optokens","account"],["optokens","description"],["optokens","kind"],["optokens","meta"],["optokens","service"],["optokens","shape"]]' "$item"
-check "service, account default, kind static, shape fields, the description, the Meta compact" '
+  == [["fields","A"],["fields","TOKEN"],["optokens","account"],["optokens","kind"],["optokens","meta"],["optokens","service"],["optokens","shape"]]' "$item"
+check "service, account default, kind static, shape fields, the Meta compact" '
   [.fields[] | select(.section.label == "optokens") | {(.label): .value}] | add
-  == {"service":"'"$service"'","account":"default","kind":"static","shape":"fields","description":"optokens e2e","meta":"{\"e2e\":1}"}' "$item"
+  == {"service":"'"$service"'","account":"default","kind":"static","shape":"fields","meta":"{\"e2e\":1}"}' "$item"
+# notes <item json>: the item's notes, the Description's home.
+notes() { printf '%s' "$1" | jq -c '[.fields[] | select(.purpose == "NOTES") | .value]'; }
+check "the description is the notes" '[.fields[] | select(.purpose == "NOTES") | .value] == ["optokens e2e"]' "$item"
+say "op item list --vault $vault --format json  (this item's title and additional_information)"
+listed=$(op item list --vault "$vault" --format json | jq -c --arg t "$title" '[.[] | select(.title == $t) | {title, additional_information}]')
+echo "$listed"
+check "1Password's list shows the description under the title" '. == [{"title":"'"$title"'","additional_information":"optokens e2e"}]' "$listed"
 printf '%s' "$item" | jq -e --arg v "$value" '[.fields[] | select(.section.label == "fields" and .label == "TOKEN")][0].value == $v' >/dev/null ||
     fail "the vault's TOKEN is not the value piped in"
 echo "ok: the vault's TOKEN is the value piped in"
@@ -178,6 +186,27 @@ printf '%s' "$out" | jq -e --arg v "$value" '.fields.A == "2" and .fields.TOKEN 
     fail "the retitle changed a value, the description or the Meta"
 echo "ok: A, TOKEN, the description and the Meta are as they were"
 
+say "op item edit $id < its template, the description in section optokens, the notes another's  (as optokens wrote it before the notes)"
+op item get "$id" --vault "$vault" --format json |
+    jq '.fields |= map(if .purpose == "NOTES" then .value = "another note" else . end)
+        | .fields += [{"id":"optokens.description","section":{"id":"optokens"},"type":"STRING","label":"description","value":"optokens e2e"}]' |
+    op item edit "$id" --vault "$vault" --format json >/dev/null
+item=$(op item get "$id" --vault "$vault" --format json)
+echo "notes: $(notes "$item"), section optokens: $(printf '%s' "$item" | jq -c '[.fields[] | select(.section.label == "optokens") | .label]')"
+check "the description is in the section" '[.fields[] | select(.section.label == "optokens" and .label == "description") | .value] == ["optokens e2e"]' "$item"
+run list
+check "list reads the section's description" '[.secrets[] | select(.service == "'"$service"'") | .description] == ["optokens e2e"]' "$out"
+say "optokens put $service --set A=2  (over it: the same Secret)"
+run put "$service" --set "A=2"
+echo "$out"
+check "put rewrites the earlier layout" '.changed' "$out"
+item=$(op item get "$id" --vault "$vault" --format json)
+echo "notes: $(notes "$item"), section optokens: $(printf '%s' "$item" | jq -c '[.fields[] | select(.section.label == "optokens") | .label]')"
+check "the description moved into the notes, the section field gone" \
+    '([.fields[] | select(.purpose == "NOTES") | .value] == ["optokens e2e"]) and ([.fields[] | select(.section.label == "optokens" and .label == "description")] == [])' "$item"
+run get "$service" --json
+check "get --json gives the same description" '.description == "optokens e2e"' "$out"
+
 pipe1=$(openssl rand -hex 16) pipe2=$(openssl rand -base64 24)
 say "optokens put $service --field-from-pipe PIPE1=<(printf ...) --field-from-pipe PIPE2=<(printf ...)  (bash; values from openssl rand)"
 # The values reach bash in its environment, which it drops before it runs
@@ -218,6 +247,15 @@ check "the vault's fields in their order" '[.fields[] | select(.section.label ==
 run env "$service"
 [ "$(printf '%s\n' "$out" | sed 's/=.*//')" = "$(printf 'export %s\n' A TOKEN PIPE1 PIPE2 NEW)" ] || fail "env does not print A TOKEN PIPE1 PIPE2 NEW in order"
 echo "ok: env prints A TOKEN PIPE1 PIPE2 NEW in order"
+
+say "optokens put $service --description ''"
+run put "$service" --description ""
+check "an empty description clears it" '.changed' "$out"
+item=$(op item get "$id" --vault "$vault" --format json)
+echo "notes: $(notes "$item")"
+check "the notes are empty" '[.fields[] | select(.purpose == "NOTES") | .value // ""] == [""]' "$item"
+run list
+check "list shows no description" '[.secrets[] | select(.service == "'"$service"'") | .description] == [null]' "$out"
 
 say "optokens rm $service"
 run rm "$service"
