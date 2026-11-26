@@ -31,13 +31,8 @@ impl Store {
     /// The service account's vault, refused with every fault the token and
     /// the vault file have.
     pub fn open(env: &Env) -> Result<Store, Vec<Refusal>> {
-        match (account::token(env), account::vault(env)) {
-            (Ok(token), Ok(vault)) => Ok(Store {
-                token,
-                vault: vault.name,
-            }),
-            (token, vault) => Err([token.err(), vault.err()].into_iter().flatten().collect()),
-        }
+        let (token, vault) = account::find(env)?;
+        Ok(Store::new(token, vault.name))
     }
 
     /// The vault `vault`, reached with `token`: `init`'s, before any lookup.

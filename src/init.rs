@@ -55,12 +55,7 @@ pub fn init(env: &Env, args: InitArgs) -> Answer {
 
 fn run(env: &Env, args: InitArgs) -> Result<Value, Vec<Refusal>> {
     if args.check {
-        let (token, vault) = match (account::token(env), account::vault(env)) {
-            (Ok(token), Ok(vault)) => (token, vault),
-            (token, vault) => {
-                return Err([token.err(), vault.err()].into_iter().flatten().collect());
-            }
-        };
+        let (token, vault) = account::find(env)?;
         let source = token.source.clone();
         checks(&Store::new(token, vault.name.clone())).map_err(|r| vec![r])?;
         return Ok(answer(&source, &vault));

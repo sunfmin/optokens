@@ -107,6 +107,7 @@ fn the_token_is_written_owner_only_and_checked_with_op_and_a_second_run_is_the_s
     );
     assert_eq!(mode(&config), 0o700);
     assert_eq!(mode(&token_file), 0o600);
+    assert_eq!(mode(&config.join("vault")), 0o600);
     assert_eq!(
         std::fs::read_to_string(&token_file).unwrap(),
         format!("{TOKEN}\n")

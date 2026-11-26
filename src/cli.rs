@@ -117,7 +117,7 @@ enum Cmd {
     /// ## What it writes
     ///
     /// - The token file, `{const:TOKEN_FILE}` in the config directory ([the token and the vault](help:account)), holding the token alone: mode 0600 on Unix; on Windows an access list granting only its owner, SYSTEM and the Administrators group, set before the token is written.
-    /// - The vault file, `{const:VAULT_FILE}` beside it, naming the vault: `--vault`, else `{const:DEFAULT_VAULT}`.
+    /// - The vault file, `{const:VAULT_FILE}` beside it, naming the vault (`--vault`, else `{const:DEFAULT_VAULT}`), only its owner may read too.
     /// - The config directory, made with mode 0700 on Unix when it is not there, and set to 0700 when it is.
     ///
     /// Each file is written whole under a fresh name in that directory, then renamed over the old one: never a temporary file elsewhere. Run again, it replaces both: the same input gives the same files.

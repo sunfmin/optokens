@@ -157,6 +157,14 @@ pub fn token(env: &Env) -> Result<Token, Refusal> {
     })
 }
 
+/// The token and the vault, refused with every fault either has.
+pub fn find(env: &Env) -> Result<(Token, Vault), Vec<Refusal>> {
+    match (token(env), vault(env)) {
+        (Ok(token), Ok(vault)) => Ok((token, vault)),
+        (token, vault) => Err([token.err(), vault.err()].into_iter().flatten().collect()),
+    }
+}
+
 /// The vault optokens keeps its Secrets in, and the file that named it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Vault {
@@ -198,8 +206,8 @@ pub fn save(env: &Env, token: &str, vault: &str) -> Result<(Token, Vault), Refus
         )
     };
     make_private_dir(&dir).map_err(|e| cannot(&dir, e))?;
-    replace(&token_file, token, true).map_err(|e| cannot(&token_file, e))?;
-    replace(&vault_file, vault, false).map_err(|e| cannot(&vault_file, e))?;
+    replace(&token_file, token).map_err(|e| cannot(&token_file, e))?;
+    replace(&vault_file, vault).map_err(|e| cannot(&vault_file, e))?;
     Ok((
         Token {
             value: token.to_string(),
@@ -228,9 +236,9 @@ fn make_private_dir(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)
 }
 
-/// `path` replaced by `text` and a newline; with `private`, a file only its
-/// owner may read, made so before anything is written into it.
-fn replace(path: &Path, text: &str, private: bool) -> std::io::Result<()> {
+/// `path` replaced by `text` and a newline, in a file only its owner may
+/// read, made so before anything is written into it.
+fn replace(path: &Path, text: &str) -> std::io::Result<()> {
     use std::io::Write;
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let fresh = path.with_file_name(format!(".{name}.{}", crate::link::random_hex(8)));
@@ -239,12 +247,7 @@ fn replace(path: &Path, text: &str, private: bool) -> std::io::Result<()> {
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     let written = options.open(&fresh).and_then(|mut file| {
-        if private {
-            access::restrict(&file)?;
-        } else {
-            #[cfg(unix)]
-            file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o644))?;
-        }
+        access::restrict(&file)?;
         file.write_all(format!("{text}\n").as_bytes())?;
         file.sync_all()?;
         drop(file);
