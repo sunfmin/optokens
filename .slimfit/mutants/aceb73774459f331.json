@@ -1,0 +1,22 @@
+{
+  "tree": "9735fa5ddec38a9ef3a47da9749f68ad4db7db55+c4706f65f5c308a3",
+  "picker": "codex:01a21889-32fb-7fc1-970f-dca04e88464d:default",
+  "author": "claude-code:3f717dff-9a81-56ec-8a5b-02b42ae8d91c:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/serve.rs:227:23: replace > with >= in read_request",
+        "why": "The oversized-header test skips exactly 16 KiB, so it would miss rejection of an incomplete header buffered at the limit.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/serve.rs:32:28: replace * with +",
+        "why": "The body boundary test derives its payload sizes from BODY_MAX, and the end-to-end submissions are small enough to pass even with the reduced limit.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  },
+  "added_lines": 400
+}
