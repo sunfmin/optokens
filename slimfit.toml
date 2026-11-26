@@ -6,3 +6,8 @@ root = "."
 [check]
 coverage_slack = 1
 growth_allowance = 50
+# The record of mutants is held at the base, as factorium's is: a landing
+# waits for its fast gate alone, and each promotion owes one record over the
+# range since the base, which factorium's "Mutants of <base>..<tip>" issue
+# picks, runs and lands. No pick count: the picker sizes its picks to the diff.
+mutants_target = "origin/main"
