@@ -166,11 +166,11 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads the Secret from the vault, merges into it what this `put` names, and writes it back as one item, only when that changes it. A Field not named is kept. `--set "NAME=value"` sets a Field that is not secret, split on the first `=`, stored as plain text; repeat it. `--field-from-stdin <Label>` sets one Field to all of stdin, one trailing newline dropped, stored concealed: for a secret a command makes and pipes in, such as `openssl rand -base64 32 | optokens put deploy-db --set "Username=svc" --field-from-stdin Password`. `--description` replaces the description; alone, for a stored Secret, it changes nothing else. A new Secret is `static` unless `--kind profile`. A Profile's labels are environment variables' names, for `env`. How a Secret is laid out in the vault: [Secrets in the vault](help:secrets).
+    /// It reads the Secret from the vault, merges into it what this `put` names, and writes it back as one item, only when that changes it. A Field not named is kept. `--set "NAME=value"` sets a Field that is not secret, split on the first `=`, stored as plain text; repeat it. `--field-from-stdin <Label>` sets one Field to all of stdin, one trailing newline dropped, stored concealed: for a secret a command makes and pipes in, such as `openssl rand -base64 32 | optokens put deploy-db --set "Username=svc" --field-from-stdin Password`. `--field-from-pipe <Label>=<(command)` sets a Field to all the command prints, one trailing newline dropped, stored concealed; repeat it to store several generated secrets in one `put`, such as `optokens put deploy-db --set "Username=svc" --field-from-pipe Password=<(openssl rand -base64 32) --field-from-pipe SigningKey=<(openssl rand -hex 32)`. The shell (bash, zsh) runs each command and puts only its pipe's path, `/dev/fd/N`, on the command line; `put` reads each pipe to its end and refuses any path that is not a pipe, a file among them. On Windows, PowerShell has no `<(command)`: the path must be a named pipe, `\\.\pipe\<name>`, or use one `put --field-from-stdin` per value. `--description` replaces the description; alone, for a stored Secret, it changes nothing else. A new Secret is `static` unless `--kind profile`. A Profile's labels are environment variables' names, for `env`. How a Secret is laid out in the vault: [Secrets in the vault](help:secrets).
     ///
     /// ## The one-time link
     ///
-    /// `--fields "<Label>,..."` names the Fields a person enters, and a bare `put <service>` (no `--set`, `--field-from-stdin` or `--fields`) the Secret's one value, with no label. For these `put` serves one page and waits:
+    /// `--fields "<Label>,..."` names the Fields a person enters, and a bare `put <service>` (no `--set`, `--field-from-stdin`, `--field-from-pipe` or `--fields`) the Secret's one value, with no label. For these `put` serves one page and waits:
     ///
     /// - **Where**: only on this host's tailnet address, from `tailscale ip`, on a port the OS picks. With no `tailscale`, or no tailnet address on this host, it stores nothing, reads no vault, and says what is missing.
     /// - **How**: HTTPS, with the certificate `tailscale cert` gives for the host's tailnet name; when that fails, plain HTTP on the tailnet, which WireGuard encrypts, with the reason and its fix printed first.
@@ -193,13 +193,14 @@ enum Cmd {
     ///
     /// ## What it may refuse
     ///
-    /// Every fault it finds, before it serves a link or writes anything: `bad_name`, `bad_set`, `bad_show`, `duplicate_label`, `not_env_name`, `kind_change`, `shape_change`, `stdin_terminal`, `stdin_empty`, `stdin_not_text`, the service account's faults ([the token and the vault](help:account)), and the vault's (`not_optokens`, `ambiguous`, `op_failed`); then `link_expired`, when no one submitted the link in time. Each is in [Secrets in the vault](help:secrets), with its fix. Without a tailnet to serve the link on, `tailscale_missing` or `no_tailnet_address`, as `optokens doctor --help` lists them, and a fault naming a tailnet address that is on no interface of this host.
+    /// Every fault it finds, before it serves a link or writes anything: `bad_name`, `bad_set`, `bad_show`, `duplicate_label`, `not_env_name`, `kind_change`, `shape_change`, `stdin_terminal`, `stdin_empty`, `stdin_not_text`, `not_a_pipe`, `pipe_empty`, `pipe_not_text`, the service account's faults ([the token and the vault](help:account)), and the vault's (`not_optokens`, `ambiguous`, `op_failed`); then `link_expired`, when no one submitted the link in time. Each is in [Secrets in the vault](help:secrets), with its fix. Without a tailnet to serve the link on, `tailscale_missing` or `no_tailnet_address`, as `optokens doctor --help` lists them, and a fault naming a tailnet address that is on no interface of this host.
     ///
     /// ## What trips you up
     ///
     /// - `put --fields` or a bare `put` does not answer until the person submits the link, or it expires: run it where it may wait {const:LINK_MINUTES} minutes, and read the link from its stderr.
     /// - Never pipe in, or `--set`, a value a person typed or pasted into the chat: give them the link.
     /// - `--set` puts its value on the command line, where `ps` shows it: only for a value that is not secret (a URL, a model, a user name).
+    /// - `--field-from-pipe Label=$(command)` is wrong: `$(…)` puts the value itself on the command line, and `put` refuses it as `not_a_pipe`. Write `Label=<(command)`, unquoted or as `"Label="<(command)`. A file is refused too, such as the temporary one zsh's `=(command)` makes.
     /// - `put` never drops a Field, nor changes a kind, nor turns a single value into Fields or back: `rm`, then `put` the Secret again.
     #[command(next_help_heading = "Run by the agent", verbatim_doc_comment)]
     Put(commands::PutArgs),
@@ -366,7 +367,7 @@ struct AccountTopic;
 /// A Field's type in the vault follows how its value came in, and `put` sets it each time it sets the Field; a Field it does not name keeps its type:
 ///
 /// - `{const:STRING}`, plain text: `--set "NAME=value"`, and a `--show` Field typed visibly on the link. A value on the command line is not secret.
-/// - `{const:CONCEALED}`, shown like a password: `--field-from-stdin <Label>`, a `--fields` Field not in `--show`, and a bare `put`'s single value. Store a secret this way.
+/// - `{const:CONCEALED}`, shown like a password: `--field-from-stdin <Label>`, `--field-from-pipe <Label>=<(command)`, a `--fields` Field not in `--show`, and a bare `put`'s single value. Store a secret this way.
 ///
 /// The type changes only how 1Password shows the field: `get`, `env` and `list` give out the same either way. An item with another type in the section `{const:VALUES}` is refused (`not_optokens`).
 ///

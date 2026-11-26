@@ -5,6 +5,7 @@ use crate::account::Env;
 use crate::cli::Answer;
 use crate::item;
 use crate::link::{self, Input, Link, Token};
+use crate::pipe;
 use crate::refusal::Refusal;
 use crate::secret::{self, Field, Kind, Name, Put, Visibility};
 use crate::serve::Endpoint;
@@ -33,6 +34,9 @@ pub struct PutArgs {
     /// The label of the one Field whose value is all of stdin, piped in by a command: stored concealed, for a secret.
     #[arg(long, value_name = "Label", verbatim_doc_comment)]
     field_from_stdin: Option<String>,
+    /// A Field whose value is all a command prints, its path a pipe, `Label=<(command)`: stored concealed; repeat it for several.
+    #[arg(long, value_name = "Label=path", verbatim_doc_comment)]
+    field_from_pipe: Vec<String>,
     /// The labels of the Fields a person enters on the one-time link, comma-separated.
     #[arg(long, value_name = "Label,...", verbatim_doc_comment)]
     fields: Option<String>,
@@ -99,9 +103,21 @@ fn put_secret(
             Err(refusal) => faults.push(refusal),
         }
     }
+    // The pipes are read to their ends in turn, not at once: each
+    // `<(command)` writes only to its own pipe and waits on no other, so the
+    // one being read ends while the others' writers wait on theirs.
+    for (i, arg) in args.field_from_pipe.iter().enumerate() {
+        match secret::pipe_field(i + 1, arg, pipe::read) {
+            Ok(field) => fields.push(field),
+            Err(refusal) => faults.push(refusal),
+        }
+    }
     // A bare `put` names no Field: its one value is entered on the link,
     // unless it is a `--description` alone for a stored Secret.
-    let bare = args.set.is_empty() && args.field_from_stdin.is_none() && asked.is_empty();
+    let bare = args.set.is_empty()
+        && args.field_from_stdin.is_none()
+        && args.field_from_pipe.is_empty()
+        && asked.is_empty();
     let path = std::env::var_os("PATH");
     let mut endpoint = None;
     if !asked.is_empty() || (bare && args.description.is_none()) {

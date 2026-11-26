@@ -127,7 +127,20 @@ impl Host {
     /// optokens `args` started as [`Host::run`] starts it, its stdin, stdout
     /// and stderr piped, for a test that talks to it while it runs.
     pub fn spawn(&self, args: &[&str], env: &[(&str, &str)]) -> std::process::Child {
-        Command::new(env!("CARGO_BIN_EXE_optokens"))
+        self.command(env!("CARGO_BIN_EXE_optokens"), args, env)
+    }
+
+    /// `script` run by `/bin/bash -c` as [`Host::run`] runs optokens, which
+    /// it finds as `"$0"`: for `<(command)`. `env` reaches bash too, so a
+    /// value in it reaches a builtin `printf` without a command line.
+    pub fn bash(&self, script: &str, env: &[(&str, &str)]) -> Ran {
+        let optokens = env!("CARGO_BIN_EXE_optokens");
+        let child = self.command("/bin/bash", &["-c", script, optokens], env);
+        ran(child.wait_with_output().unwrap())
+    }
+
+    fn command(&self, program: &str, args: &[&str], env: &[(&str, &str)]) -> std::process::Child {
+        Command::new(program)
             .args(args)
             .env_clear()
             // A coverage run's profile path: without it the run writes `default_*.profraw` here and counts none of it.

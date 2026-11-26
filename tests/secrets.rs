@@ -342,6 +342,11 @@ fn a_single_value_is_got_bare_and_never_exported() {
         "x",
     );
     assert_eq!(kinds(&shape.json()), ["shape_change"]);
+    let pipe = host.bash(
+        r#""$0" put cloudflare --field-from-pipe Token=<(printf x)"#,
+        &[TOKEN],
+    );
+    assert_eq!(kinds(&pipe.json()), ["shape_change"]);
     let described = run(&host, &["put", "cloudflare", "--description", "DNS edits"]);
     assert_eq!(
         described.json(),
@@ -382,6 +387,20 @@ fn a_value_is_in_no_command_line_and_no_temporary_file() {
         format!("{MARKER}-2")
     );
     assert!(run(&host, &["env", "db"]).stdout.contains(MARKER));
+    // The values reach bash in its environment, which it drops before it
+    // runs optokens: only its builtin `printf` holds them.
+    let pipes = host.bash(
+        r#"a=$A b=$B; unset A B; "$0" put db --field-from-pipe Key=<(printf %s "$a") --field-from-pipe Salt=<(printf %s "$b")"#,
+        &[TOKEN, ("A", &format!("{MARKER}-a")), ("B", &format!("{MARKER}-b"))],
+    );
+    assert_eq!(
+        pipes.json()["fields"],
+        json!(["User", "Password", "Key", "Salt"])
+    );
+    assert_eq!(
+        run(&host, &["get", "db", "--field", "Salt"]).stdout,
+        format!("{MARKER}-b")
+    );
 
     let calls = host.calls();
     let calls = calls.as_array().unwrap();
@@ -411,6 +430,84 @@ fn a_value_is_in_no_command_line_and_no_temporary_file() {
             "a value in a temporary file: {call}"
         );
     }
+}
+
+#[test]
+fn two_pipes_are_stored_concealed_in_one_put_and_one_write() {
+    let host = host();
+    let put = host.bash(
+        r#""$0" put deploy-db --set User=svc --field-from-pipe Password=<(printf 'p w\n') --field-from-pipe "SigningKey="<(printf k)"#,
+        &[TOKEN],
+    );
+    assert_eq!(put.code, 0, "{}{}", put.stdout, put.stderr);
+    assert_eq!(
+        put.json()["fields"],
+        json!(["User", "Password", "SigningKey"])
+    );
+    assert_eq!(
+        op_lines(&host),
+        [
+            "item list --vault optokens --format json",
+            "item create --vault optokens --format json -"
+        ]
+    );
+    assert_eq!(
+        host.field_types("deploy-db/default"),
+        json!({ "User": "STRING", "Password": "CONCEALED", "SigningKey": "CONCEALED" })
+    );
+    assert_eq!(
+        run(&host, &["get", "deploy-db", "--json"]).json()["fields"],
+        json!({ "User": "svc", "Password": "p w", "SigningKey": "k" })
+    );
+}
+
+/// A file, a missing path, a terminal-less mistake (`Label=$(command)`, the
+/// value itself as the path) and an empty pipe are each refused by Label,
+/// before the vault is read, and no path is ever printed.
+#[test]
+fn a_pipe_that_is_no_pipe_or_empty_is_refused_before_the_vault() {
+    const MARKER: &str = "MARKER-5d1e-path";
+    let host = host();
+    let file = host.dir.path().join(format!("tmp/{MARKER}-file"));
+    std::fs::write(&file, "a value in a file").unwrap();
+    let refused = host.bash(
+        &format!(
+            r#""$0" put db --field-from-pipe File={} --field-from-pipe Gone=/nonexistent/{MARKER} --field-from-pipe Inline={MARKER}-value --field-from-pipe Empty=<(printf '\n') --field-from-pipe {MARKER}"#,
+            file.display()
+        ),
+        &[TOKEN],
+    );
+    assert_eq!(
+        kinds(&refused.json()),
+        [
+            "not_a_pipe",
+            "not_a_pipe",
+            "not_a_pipe",
+            "pipe_empty",
+            "not_a_pipe"
+        ]
+    );
+    assert_eq!(
+        refused.json()["error"][0]["fault"],
+        "`--field-from-pipe File=` names no pipe that can be read"
+    );
+    assert!(
+        !refused.stdout.contains(MARKER) && !refused.stderr.contains(MARKER),
+        "{}{}",
+        refused.stdout,
+        refused.stderr
+    );
+    assert_eq!(
+        host.calls(),
+        Value::Null,
+        "no refusal before the vault calls op"
+    );
+    let twice = host.bash(
+        r#"printf s | "$0" put db --set A=1 --field-from-stdin B --field-from-pipe A=<(printf x) --field-from-pipe B=<(printf y)"#,
+        &[TOKEN],
+    );
+    assert_eq!(kinds(&twice.json()), ["duplicate_label", "duplicate_label"]);
+    assert!(!op_lines(&host).iter().any(|l| l.contains("create")));
 }
 
 #[test]
