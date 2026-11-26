@@ -170,14 +170,16 @@ fn put_secret(
             }
         }
     }
-    let changed = existing != Some(&merged);
+    // An item an earlier optokens wrote is rewritten in this layout, in place.
+    let stale = found.as_ref().is_some_and(|f| !f.current);
+    let changed = existing != Some(&merged) || stale;
     if changed {
         store
             .write(found.as_ref().map(|f| f.id.as_str()), &name, &merged)
             .map_err(|r| vec![r])?;
     }
     Ok(json!({
-        "secret": name.title(),
+        "secret": name.to_string(),
         "changed": changed,
         "kind": merged.kind.name(),
         "fields": merged.labels(),
@@ -222,7 +224,7 @@ fn link_for(name: &Name, existing: Option<&secret::Secret>, put: &Put, asked: &[
         .description
         .as_deref()
         .or_else(|| existing.and_then(|e| e.description.as_deref()));
-    fresh_link(&name.title(), description, fields)
+    fresh_link(&name.to_string(), description, fields)
 }
 
 /// A link made now, with a fresh token, for [`link::LIFETIME`] (a test's
@@ -250,7 +252,7 @@ fn found(env: &Env, service: &str, account: &str) -> Result<(Name, secret::Secre
         Some(found) => Ok((name, found.secret)),
         None => Err(vec![Refusal::of(
             &secret::Fault::NotFound,
-            format!("the vault has no Secret `{}`", name.title()),
+            format!("the vault has no Secret `{name}`"),
             "run `optokens list` to see what it has, or `optokens put` it",
         )]),
     }
@@ -304,7 +306,9 @@ pub fn rm(env: &Env, service: &str, account: &str) -> Answer {
             Ok((name, found.is_some()))
         });
     match removed {
-        Ok((name, changed)) => Answer::json(&json!({ "secret": name.title(), "changed": changed })),
+        Ok((name, changed)) => {
+            Answer::json(&json!({ "secret": name.to_string(), "changed": changed }))
+        }
         Err(faults) => Answer::refused(faults),
     }
 }

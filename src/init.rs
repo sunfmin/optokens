@@ -38,7 +38,7 @@ pub enum Check {
     VaultListed,
     /// `op item list` reads the vault's items. Fix: give the service account read on the vault, as for `vault_listed`.
     VaultRead,
-    /// `op item create` writes the probe item `optokens-init-probe/default`, tagged `optokens` (`op item edit`, over one an earlier `init` left). Fix: give the service account write on the vault, as for `vault_listed`.
+    /// `op item create` writes the probe item `optokens-init-probe`, tagged `optokens` (`op item edit`, over one an earlier `init` left). Fix: give the service account write on the vault, as for `vault_listed`.
     ProbeWritten,
     /// The probe item, read back, holds what was written. Fix: run `optokens init --check` again.
     ProbeReadBack,

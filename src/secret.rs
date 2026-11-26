@@ -11,7 +11,7 @@ pub const DEFAULT_ACCOUNT: &str = "default";
 /// Why a command about a Secret refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, agent_help::Help)]
 pub enum Fault {
-    /// The service or the account is empty or holds a `/`, which the vault item's title `<service>/<account>` cannot carry. Fix: name it with a slug, such as `cloudflare`.
+    /// The service or the account is empty or holds a `/`, which an `op://` reference to the vault item's title cannot carry. Fix: name it with a slug, such as `cloudflare`.
     BadName,
     /// A `--set` is not `NAME=value`, or a Field's label is empty. Fix: write it as `--set "NAME=value"`; the first `=` splits it.
     BadSet,
@@ -45,7 +45,7 @@ pub enum Fault {
     NoSuchField,
     /// `env` has nothing to export: the Secret is a single value, or a label is not an environment variable's name. Fix: `optokens get` its value instead.
     NotEnv,
-    /// An item in the vault has the Secret's title but is not one optokens wrote: it has no `optokens` tag, or its `optokens` section is not optokens' layout. optokens never guesses at it. Fix: rename or move that item in 1Password, or `optokens rm` it if optokens wrote it.
+    /// An item in the vault has the Secret's title (or its earlier `<service>/<account>`) but is not one optokens wrote: it has no `optokens` tag, or its `optokens` section is not optokens' layout. optokens never guesses at it. Fix: rename or move that item in 1Password, or `optokens rm` it if optokens wrote it.
     NotOptokens,
     /// Two items in the vault are the same Secret. Fix: delete one of them in 1Password.
     Ambiguous,
@@ -130,8 +130,8 @@ impl Secret {
     }
 }
 
-/// A Secret's name: its service and account.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A Secret's name: its service and account, ordered by service, then account.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Name {
     service: String,
     account: String,
@@ -156,13 +156,19 @@ impl Name {
         })
     }
 
-    /// The vault item's title: `<service>/<account>`.
+    /// The vault item's title: `<service>`, or `<service>.<account>` when
+    /// the account is not the default. It holds no `/`, so `op://` reaches it;
+    /// a service may hold a `.`, so the title alone never says the name.
     pub fn title(&self) -> String {
-        format!("{}/{}", self.service, self.account)
+        if self.account == DEFAULT_ACCOUNT {
+            self.service.clone()
+        } else {
+            format!("{}.{}", self.service, self.account)
+        }
     }
 
-    /// The name a title holds, or `None` when it holds none.
-    pub fn from_title(title: &str) -> Option<Name> {
+    /// The name an earlier optokens' title holds, or `None` when it holds none.
+    pub fn from_old_title(title: &str) -> Option<Name> {
         let (service, account) = title.split_once('/')?;
         Name::new(service, account).ok()
     }
@@ -182,6 +188,14 @@ impl Name {
 
     pub fn account(&self) -> &str {
         &self.account
+    }
+}
+
+/// How answers and refusals name a Secret, and the title an earlier
+/// optokens gave its item: `<service>/<account>`.
+impl std::fmt::Display for Name {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}/{}", self.service, self.account)
     }
 }
 
@@ -316,13 +330,13 @@ pub fn is_env_name(label: &str) -> bool {
 /// set, value and visibility, the rest kept as they were, in their order. Every fault found is refused at once.
 pub fn merge(name: &Name, existing: Option<&Secret>, put: &Put) -> Result<Secret, Vec<Refusal>> {
     let mut faults = Vec::new();
-    let title = name.title();
+    let shown = name.to_string();
     let kind = match (existing, put.kind) {
         (Some(e), Some(k)) if e.kind != k => {
             faults.push(Refusal::of(
                 &Fault::KindChange,
                 format!(
-                    "`{title}` is a {} Secret, and `--kind {}` would change it",
+                    "`{shown}` is a {} Secret, and `--kind {}` would change it",
                     e.kind.name(),
                     k.name()
                 ),
@@ -350,12 +364,12 @@ pub fn merge(name: &Name, existing: Option<&Secret>, put: &Put) -> Result<Secret
     ) {
         (Some(Values::Single(_)), false, _) => faults.push(Refusal::of(
             &Fault::ShapeChange,
-            format!("`{title}` is a single value, and `put` never turns it into labelled Fields"),
+            format!("`{shown}` is a single value, and `put` never turns it into labelled Fields"),
             again,
         )),
         (Some(Values::Fields(_)), _, Some(_)) => faults.push(Refusal::of(
             &Fault::ShapeChange,
-            format!("`{title}` has labelled Fields, and a bare `put` would make it a single value"),
+            format!("`{shown}` has labelled Fields, and a bare `put` would make it a single value"),
             format!(
                 "name the Fields to change, `optokens put {}{} --fields <Label>,...`; or {again}",
                 shell_word(name.service()),
@@ -367,7 +381,7 @@ pub fn merge(name: &Name, existing: Option<&Secret>, put: &Put) -> Result<Secret
     if kind == Kind::Profile && put.value.is_some() {
         faults.push(Refusal::of(
             &Fault::NotEnvName,
-            format!("`{title}` is a Profile, whose Fields are environment variables' names, and a bare `put` stores one value with no name"),
+            format!("`{shown}` is a Profile, whose Fields are environment variables' names, and a bare `put` stores one value with no name"),
             format!("name its Fields: `optokens put {}{} --fields NAME,...`", shell_word(name.service()), name.flag()),
         ));
     }
@@ -380,7 +394,7 @@ pub fn merge(name: &Name, existing: Option<&Secret>, put: &Put) -> Result<Secret
             if before().count() == 1 {
                 faults.push(Refusal::of(
                     &Fault::DuplicateLabel,
-                    format!("`put {title}` names the Field `{label}` twice"),
+                    format!("`put {shown}` names the Field `{label}` twice"),
                     format!("name `{label}` once"),
                 ));
             }
@@ -424,12 +438,12 @@ pub fn merge(name: &Name, existing: Option<&Secret>, put: &Put) -> Result<Secret
 /// The value `get` prints: the single value, or the Field `field` names.
 pub fn value<'a>(name: &Name, secret: &'a Secret, field: Option<&str>) -> Result<&'a str, Refusal> {
     let get = format!("optokens get {}{}", shell_word(name.service()), name.flag());
-    let title = name.title();
+    let shown = name.to_string();
     match (&secret.values, field) {
         (Values::Single(value), None) => Ok(value),
         (Values::Single(_), Some(label)) => Err(Refusal::of(
             &Fault::NoSuchField,
-            format!("`{title}` is a single value, with no Field `{label}`"),
+            format!("`{shown}` is a single value, with no Field `{label}`"),
             format!("run `{get}` without `--field`"),
         )),
         (Values::Fields(fields), Some(label)) => fields
@@ -440,7 +454,7 @@ pub fn value<'a>(name: &Name, secret: &'a Secret, field: Option<&str>) -> Result
                 Refusal::of(
                     &Fault::NoSuchField,
                     format!(
-                        "`{title}` has no Field `{label}`; its Fields are {}",
+                        "`{shown}` has no Field `{label}`; its Fields are {}",
                         list_labels(fields)
                     ),
                     format!("run `{get} --field {}`", shell_word(&fields[0].label)),
@@ -449,7 +463,7 @@ pub fn value<'a>(name: &Name, secret: &'a Secret, field: Option<&str>) -> Result
         (Values::Fields(fields), None) => Err(Refusal::of(
             &Fault::NoSuchField,
             format!(
-                "`{title}` has labelled Fields, {}: `get` prints one",
+                "`{shown}` has labelled Fields, {}: `get` prints one",
                 list_labels(fields)
             ),
             format!(
@@ -505,12 +519,12 @@ fn head(name: &Name, secret: &Secret) -> Value {
 /// `env`'s lines: `export NAME='value'`, one per Field.
 pub fn exports(name: &Name, secret: &Secret) -> Result<String, Refusal> {
     let get = format!("optokens get {}{}", shell_word(name.service()), name.flag());
-    let title = name.title();
+    let shown = name.to_string();
     let fields = match &secret.values {
         Values::Single(_) => {
             return Err(Refusal::of(
                 &Fault::NotEnv,
-                format!("`{title}` is a single value, with no variable's name to export it as"),
+                format!("`{shown}` is a single value, with no variable's name to export it as"),
                 format!("run `{get}`"),
             ));
         }
@@ -525,7 +539,7 @@ pub fn exports(name: &Name, secret: &Secret) -> Result<String, Refusal> {
         return Err(Refusal::of(
             &Fault::NotEnv,
             format!(
-                "`{title}` has Fields that are not environment variables' names: {}",
+                "`{shown}` has Fields that are not environment variables' names: {}",
                 bad.iter()
                     .map(|l| format!("`{l}`"))
                     .collect::<Vec<_>>()
@@ -831,10 +845,18 @@ mod tests {
 
     #[test]
     fn a_name_is_two_slugs_without_a_slash() {
-        assert_eq!(Name::new("a", "b").unwrap().title(), "a/b");
-        assert_eq!(Name::from_title("a/b"), Some(Name::new("a", "b").unwrap()));
-        assert_eq!(Name::from_title("a/b/c"), None);
-        assert_eq!(Name::from_title("ab"), None);
+        assert_eq!(Name::new("a", "b").unwrap().to_string(), "a/b");
+        assert_eq!(Name::new("a", "b").unwrap().title(), "a.b");
+        assert_eq!(
+            Name::new("name.com", "default").unwrap().title(),
+            "name.com"
+        );
+        assert_eq!(
+            Name::from_old_title("a/b"),
+            Some(Name::new("a", "b").unwrap())
+        );
+        assert_eq!(Name::from_old_title("a/b/c"), None);
+        assert_eq!(Name::from_old_title("ab"), None);
         assert_eq!(Name::new("", "b").unwrap_err().kind, Some("bad_name"));
         assert_eq!(Name::new("a/x", "b").unwrap_err().kind, Some("bad_name"));
     }

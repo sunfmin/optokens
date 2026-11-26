@@ -149,7 +149,7 @@ fn fields_over_plain_http_store_once_and_a_second_post_is_gone() {
     );
     assert_eq!(stored.json()["description"], "CI database");
     assert_eq!(
-        host.field_types("db/default"),
+        host.field_types("db"),
         json!({ "Host": "STRING", "Password": "CONCEALED", "User": "STRING" }),
         "--set and --show are plain, a hidden input concealed"
     );
@@ -195,7 +195,7 @@ fn a_bare_put_over_https_stores_one_value() {
     );
     assert_eq!(get(&host, &["get", "cloudflare"]).stdout, "cf+token");
     assert_eq!(
-        host.field_types("cloudflare/default"),
+        host.field_types("cloudflare"),
         json!({ "value": "CONCEALED" })
     );
     let cert = host

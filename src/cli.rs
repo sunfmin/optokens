@@ -292,7 +292,7 @@ enum Cmd {
     ///
     /// ## What it answers
     ///
-    /// `secrets`, in title order, each with `service`, `account`, `kind`, `description` (or `null`) and `fields`, its labels (`null` for a single value):
+    /// `secrets`, by service, then account, each with `service`, `account`, `kind`, `description` (or `null`) and `fields`, its labels (`null` for a single value):
     ///
     /// ```json
     /// { "secrets": [ { "service": "glm", "account": "default", "kind": "profile", "description": "Claude Code to GLM", "fields": ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] } ] }
@@ -360,7 +360,9 @@ struct AccountTopic;
 ///
 /// ## One item per Secret
 ///
-/// A Secret is one item of the vault, of the category `{const:CATEGORY}`, titled `<service>/<account>` and tagged `{const:TAG}`. Its values are the fields of the section `{const:VALUES}`, each labelled with its Field's label (a single value is one field, `{const:SINGLE}`). Its kind, its description and whether it is a single value are the fields of the section `{const:META}`, so a Field may be called `kind` or `description` without a clash.
+/// A Secret is one item of the vault, of the category `{const:CATEGORY}`, titled `<service>`, or `<service>.<account>` when the account is not `{const:DEFAULT_ACCOUNT}`, and tagged `{const:TAG}`. The title holds no `/`, so `op read "op://<vault>/<title>/{const:VALUES}/<Label>"` reads a Field. Its values are the fields of the section `{const:VALUES}`, each labelled with its Field's label (a single value is one field, `{const:SINGLE}`). Its service (`{const:SERVICE}`), its account (`{const:ACCOUNT}`), its kind, its description and whether it is a single value are the fields of the section `{const:META}`, so a Field may be called `kind` or `description` without a clash.
+///
+/// optokens takes a Secret's name from the fields `{const:SERVICE}` and `{const:ACCOUNT}`, never from the title: a service may hold a `.`, so `a.b` is the title of both `a.b` and `a --account b`, each found by its own section. An item an earlier optokens titled `<service>/<account>`, without those fields, is still read by its title; the next `put` of that Secret rewrites it, the same item, under its new title.
 ///
 /// ## Which Fields are concealed
 ///
@@ -371,7 +373,7 @@ struct AccountTopic;
 ///
 /// The type changes only how 1Password shows the field: `get`, `env` and `list` give out the same either way. An item with another type in the section `{const:VALUES}` is refused (`not_optokens`).
 ///
-/// optokens reads only items tagged `{const:TAG}`. An item of a Secret's title without the tag, or one whose section `{const:META}` is not this layout, is refused by name (`not_optokens`), never guessed at. Edit a Secret with optokens, not in 1Password.
+/// optokens reads only items tagged `{const:TAG}`. An item of a Secret's title (new or old) without the tag, or one whose section `{const:META}` is not this layout, is refused by name (`not_optokens`), never guessed at. Edit a Secret with optokens, not in 1Password.
 ///
 /// ## The faults
 ///
@@ -396,6 +398,9 @@ pub(crate) fn help() -> Help {
         .constant("DEFAULT_VAULT", account::DEFAULT_VAULT)
         .constant("CATEGORY", item::CATEGORY)
         .constant("TAG", item::TAG)
+        .constant("SERVICE", item::SERVICE)
+        .constant("ACCOUNT", item::ACCOUNT)
+        .constant("DEFAULT_ACCOUNT", secret::DEFAULT_ACCOUNT)
         .constant("VALUES", item::VALUES)
         .constant("META", item::META)
         .constant("SINGLE", item::SINGLE)
