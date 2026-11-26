@@ -6,7 +6,7 @@ One Secret is one item of the vault, of the category `SECURE_NOTE`, titled as de
 
 The Meta is a field `meta` of the section `optokens` too: one JSON object written compact, absent when the Secret has none (an item written before Meta has none). Meta is a field of its own, not folded into the description: it is data a program reads, not prose (Felix, 2026-11-27).
 
-Reading an item back gives exactly the Secret that was stored. An item without the `optokens` tag, or whose `optokens` section is not this shape, is refused by name, never guessed at. `put` reads the item, merges, and writes it whole with `op item create` or `op item edit`, the template on `op`'s stdin. An edit template replaces the whole item, so it carries what optokens does not own: every other tag, section and field (mytokens' tags and sections, the notes), read past and never refused (optokens#18).
+Reading an item back gives exactly the Secret that was stored. An item without the `optokens` tag, or whose `optokens` section is not this shape, is refused by name, never guessed at. `put` reads the item, merges, and writes it whole with `op item create` or `op item edit`, the template on `op`'s stdin. An edit template replaces the whole item, so it carries what optokens does not own: every other tag, section and field (mytokens' tags and sections, the notes), read past and never refused, as mytokens writes and reads this layout too (Felix, 2026-11-27: 「双向同步要」).
 
 ## Considered Options
 
