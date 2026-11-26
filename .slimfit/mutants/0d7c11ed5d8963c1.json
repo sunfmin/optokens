@@ -1,0 +1,7 @@
+{
+  "tree": "ff55d77232406ac112b0e48b9c4db2665f22c15f+d1fba762150c532c",
+  "picker": "codex:01a21a49-bc82-73c3-bb91-2b35d2b82eea:default",
+  "author": "claude-code:742f5a24-fda8-5878-8a32-78842c5c62f9:opus",
+  "none": "The tests directly check notes recognition and preservation, legacy description precedence and migration, skipped rewrites for current items, and clearing a description.",
+  "added_lines": 32
+}
