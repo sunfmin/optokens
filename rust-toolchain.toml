@@ -1,6 +1,6 @@
-# The one toolchain everything builds with, as the sibling Rust CLIs (docfit, stablehand, slimfit) pin it; the Windows target so the gate checks the Windows build.
+# The one toolchain everything builds with, as the sibling Rust CLIs (docfit, stablehand, slimfit) pin it, with the target of each of the five platforms packaging/release.sh builds (the gate clippy-checks the Windows one).
 [toolchain]
 channel = "nightly-2026-10-22"
 profile = "minimal"
 components = ["rustfmt", "clippy"]
-targets = ["x86_64-pc-windows-msvc"]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc"]
