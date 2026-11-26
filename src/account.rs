@@ -100,7 +100,6 @@ pub struct Token {
 
 impl Token {
     /// The value, for the one place that hands it to `op`'s environment.
-    #[allow(dead_code)] // the first command that runs `op` with it calls it
     pub fn value(&self) -> &str {
         &self.value
     }

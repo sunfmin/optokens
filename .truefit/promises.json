@@ -61,6 +61,12 @@
     "sentence": "`env` prints `export NAME='value'` lines on every OS, for sh, bash and zsh, Git Bash and WSL on Windows included, as mytokens prints them (ADR 0001). There is no PowerShell form yet: `env --shell powershell` is added when someone needs it.",
     "source": "docs/adr/0005-env-prints-posix-exports.md:3"
   },
+  "db45976686a7": {
+    "mark": "not",
+    "sentence": "Decided by the tech lead for Felix, when this storage was planned: 「Chose: a section of its own, because a user Field may be called `kind` or `description` (a Profile's env var); keeping metadata in its own section means a label never collides with it.」",
+    "source": "docs/adr/0009-one-item-per-secret-metadata-in-its-own-section.md:3",
+    "why": "the decision's quoted source; the same promise is registered from line 13 as label-never-collides-with-metadata"
+  },
   "ed3cdea1b429": {
     "mark": "promise",
     "sentence": "The page names the Secret (`<service>/<account>`) and its Description, and has one input per Field it asks for: plain text for a `--show` Field, a password input for the rest; a Field already set shows only \"already set\", its value never on the page, and every piece of text on it is HTML-escaped.",

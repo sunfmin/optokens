@@ -26,15 +26,30 @@ pub struct Ran {
     pub stderr: String,
 }
 
-/// Runs `command`, its stdin empty, and waits at most `bound` for it to
-/// exit; past that it is killed and refused, naming the bound.
-pub fn bounded(mut command: Command, bound: Duration) -> Result<Ran, String> {
+/// Runs `command` with `input` on its stdin (empty without it), and waits
+/// at most `bound` for it to exit; past that it is killed and refused,
+/// naming the bound.
+pub fn bounded(
+    mut command: Command,
+    input: Option<Vec<u8>>,
+    bound: Duration,
+) -> Result<Ran, String> {
     let mut child = command
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("cannot run it: {e}"))?;
+    if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
+        // A thread, so a child that answers before it reads all cannot block us.
+        std::thread::spawn(move || {
+            let _ = std::io::Write::write_all(&mut stdin, &input);
+        });
+    }
     let pipe = |mut p: Box<dyn Read + Send>| {
         std::thread::spawn(move || {
             let mut text = String::new();

@@ -2,79 +2,12 @@
 //! the stand-in of `examples/standin.rs` placed first on `PATH`.
 #![cfg(unix)]
 
+mod common;
+
+use common::Host;
 use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{Duration, Instant};
-
-/// A host for one test: a home, a bin directory of stand-ins, their state.
-struct Host {
-    dir: tempfile::TempDir,
-}
-
-fn standin() -> PathBuf {
-    Path::new(env!("CARGO_BIN_EXE_optokens"))
-        .parent()
-        .unwrap()
-        .join("examples/standin")
-}
-
-impl Host {
-    /// `programs` linked to the stand-in, which answers as `state` says.
-    fn new(programs: &[&str], state: Value) -> Host {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("bin")).unwrap();
-        std::fs::create_dir_all(dir.path().join("home")).unwrap();
-        for program in programs {
-            std::os::unix::fs::symlink(standin(), dir.path().join("bin").join(program)).unwrap();
-        }
-        let host = Host { dir };
-        std::fs::write(host.state_file(), state.to_string()).unwrap();
-        host
-    }
-
-    fn state_file(&self) -> PathBuf {
-        self.dir.path().join("state.json")
-    }
-
-    fn calls(&self) -> Value {
-        let state: Value =
-            serde_json::from_str(&std::fs::read_to_string(self.state_file()).unwrap()).unwrap();
-        state["calls"].clone()
-    }
-
-    fn config(&self) -> PathBuf {
-        self.dir.path().join("home/.config/optokens")
-    }
-
-    /// The token file, written with `mode`.
-    fn token_file(&self, mode: u32) -> PathBuf {
-        std::fs::create_dir_all(self.config()).unwrap();
-        let path = self.config().join("token");
-        std::fs::write(&path, "ops_from_file\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
-        path
-    }
-
-    /// `optokens doctor` with only `env` and the stand-ins: its exit code and answer.
-    fn doctor(&self, env: &[(&str, &str)]) -> (i32, Value) {
-        let out = Command::new(env!("CARGO_BIN_EXE_optokens"))
-            .arg("doctor")
-            .env_clear()
-            // A coverage run's profile path: without it the run writes `default_*.profraw` here and counts none of it.
-            .envs(std::env::var_os("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
-            .env("PATH", self.dir.path().join("bin"))
-            .env("HOME", self.dir.path().join("home"))
-            .env("OPTOKENS_STANDIN_STATE", self.state_file())
-            .envs(env.iter().copied())
-            .output()
-            .unwrap();
-        let stdout = String::from_utf8(out.stdout).unwrap();
-        let answer = serde_json::from_str(&stdout).unwrap_or_else(|e| panic!("{e}: {stdout}"));
-        (out.status.code().unwrap(), answer)
-    }
-}
 
 fn healthy() -> Value {
     json!({
