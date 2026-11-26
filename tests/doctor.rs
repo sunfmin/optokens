@@ -158,6 +158,22 @@ fn a_token_file_at_0644_is_refused_with_its_chmod_and_left_as_it_is() {
 }
 
 #[test]
+fn a_token_file_that_cannot_be_opened_is_unreadable_not_missing() {
+    let host = Host::new(&["op", "tailscale"], healthy());
+    let file = host.token_file(0o000);
+    let (_, answer) = host.doctor(&[]);
+    assert_eq!(kinds(&answer), ["unreadable"], "{answer}");
+    let fault = answer["findings"][0]["fault"].as_str().unwrap();
+    assert!(
+        fault.starts_with(&format!(
+            "cannot read `{}`: Permission denied",
+            file.display()
+        )),
+        "{fault}"
+    );
+}
+
+#[test]
 fn a_token_file_at_0600_is_found_and_the_vault_file_names_the_vault() {
     let host = Host::new(&["op", "tailscale"], healthy());
     let file = host.token_file(0o600);

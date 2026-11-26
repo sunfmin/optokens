@@ -34,6 +34,8 @@ pub struct Env {
     pub xdg_config_home: Option<OsString>,
     pub home: Option<OsString>,
     pub appdata: Option<OsString>,
+    /// Whether this is Windows, where the config directory is in `APPDATA`.
+    pub windows: bool,
 }
 
 impl Env {
@@ -44,6 +46,7 @@ impl Env {
             xdg_config_home: var("XDG_CONFIG_HOME"),
             home: var("HOME"),
             appdata: var("APPDATA"),
+            windows: cfg!(windows),
         }
     }
 }
@@ -53,11 +56,11 @@ impl Env {
 pub fn config_dir(env: &Env) -> Result<PathBuf, Refusal> {
     let base = match &env.xdg_config_home {
         Some(xdg) => Some(PathBuf::from(xdg)),
-        None if cfg!(windows) => env.appdata.as_ref().map(PathBuf::from),
+        None if env.windows => env.appdata.as_ref().map(PathBuf::from),
         None => env.home.as_ref().map(|h| Path::new(h).join(".config")),
     };
     base.map(|b| b.join("optokens")).ok_or_else(|| {
-        let names = if cfg!(windows) {
+        let names = if env.windows {
             "XDG_CONFIG_HOME nor APPDATA"
         } else {
             "XDG_CONFIG_HOME nor HOME"
@@ -214,7 +217,6 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     #[test]
     fn the_config_dir_is_xdg_config_home_else_dot_config_in_home() {
         assert_eq!(
@@ -230,6 +232,32 @@ mod tests {
         assert_eq!(
             none.fix,
             "set HOME (or XDG_CONFIG_HOME) to the user's directories"
+        );
+    }
+
+    #[test]
+    fn on_windows_the_config_dir_is_in_appdata_unless_xdg_config_home_is_set() {
+        let windows = Env {
+            appdata: Some(r"C:\Users\ci\AppData\Roaming".into()),
+            windows: true,
+            ..env(None, Some("/h"))
+        };
+        assert_eq!(
+            config_dir(&windows).unwrap(),
+            Path::new(r"C:\Users\ci\AppData\Roaming").join("optokens")
+        );
+        let xdg = Env {
+            xdg_config_home: Some("/x".into()),
+            ..windows.clone()
+        };
+        assert_eq!(config_dir(&xdg).unwrap(), Path::new("/x/optokens"));
+        let none = Env {
+            appdata: None,
+            ..windows
+        };
+        assert_eq!(
+            config_dir(&none).unwrap_err().fault,
+            "neither XDG_CONFIG_HOME nor APPDATA is set: there is no config directory to find the token file in"
         );
     }
 

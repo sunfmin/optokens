@@ -29,24 +29,73 @@ pub fn private(_file: &File, meta: &Metadata, path: &Path) -> Result<(), Refusal
 
 #[cfg(windows)]
 pub fn private(file: &File, _meta: &Metadata, path: &Path) -> Result<(), Refusal> {
-    let others = windows::others(file).map_err(|e| {
-        Refusal::of(
-            &Fault::TokenFileOpen,
-            format!(
-                "cannot read the access list of the token file `{}`: {e}",
-                path.display()
-            ),
-            format!(
-                "icacls \"{}\" /inheritance:r /grant:r \"%USERNAME%:F\"",
-                path.display()
-            ),
-        )
-    })?;
+    judge(path, windows::entries(file))
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn private(_file: &File, _meta: &Metadata, _path: &Path) -> Result<(), Refusal> {
+    Ok(())
+}
+
+/// One entry of a file's access list, as Windows reports it.
+#[cfg_attr(not(windows), allow(dead_code))] // judged on every OS, read only on Windows
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Entry {
+    /// Grants access to `sid`, which may be the file's owner, SYSTEM or the
+    /// Administrators group.
+    Allow {
+        sid: String,
+        owner: bool,
+        system: bool,
+        admins: bool,
+    },
+    /// Takes access away.
+    Deny,
+    /// A grant of another type (an object or a callback entry), by its type.
+    Other(u8),
+}
+
+/// A Windows token file's access list judged: refused unless it grants
+/// nobody but its owner, SYSTEM and the Administrators group. `None` is a
+/// null list, which grants everyone; `Err`, a list that could not be read.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn judge(path: &Path, dacl: Result<Option<Vec<Entry>>, String>) -> Result<(), Refusal> {
+    let strip = format!(
+        "icacls \"{}\" /inheritance:r /grant:r \"%USERNAME%:F\"",
+        path.display()
+    );
+    let others: Vec<String> = match dacl {
+        Err(e) => {
+            return Err(Refusal::of(
+                &Fault::TokenFileOpen,
+                format!(
+                    "cannot read the access list of the token file `{}`: {e}",
+                    path.display()
+                ),
+                strip,
+            ));
+        }
+        Ok(None) => vec!["Everyone (the file has no access list)".to_string()],
+        Ok(Some(entries)) => entries
+            .into_iter()
+            .filter_map(|entry| match entry {
+                Entry::Allow {
+                    sid,
+                    owner,
+                    system,
+                    admins,
+                } => (!(owner || system || admins)).then_some(sid),
+                Entry::Deny => None,
+                Entry::Other(kind) => Some(format!("an entry of type {kind}")),
+            })
+            .collect(),
+    };
     if others.is_empty() {
         return Ok(());
     }
     let removes: String = others
         .iter()
+        .filter(|o| o.starts_with("S-"))
         .map(|sid| format!(" /remove \"*{sid}\""))
         .collect();
     Err(Refusal::of(
@@ -56,20 +105,13 @@ pub fn private(file: &File, _meta: &Metadata, path: &Path) -> Result<(), Refusal
             path.display(),
             others.join(", ")
         ),
-        format!(
-            "icacls \"{}\" /inheritance:r /grant:r \"%USERNAME%:F\"{removes}",
-            path.display()
-        ),
+        format!("{strip}{removes}"),
     ))
-}
-
-#[cfg(not(any(unix, windows)))]
-pub fn private(_file: &File, _meta: &Metadata, _path: &Path) -> Result<(), Refusal> {
-    Ok(())
 }
 
 #[cfg(windows)]
 mod windows {
+    use super::Entry;
     use std::fs::File;
     use std::os::windows::io::AsRawHandle;
     use std::ptr::null_mut;
@@ -98,10 +140,9 @@ mod windows {
         }
     }
 
-    /// Each entry of `file`'s access list that grants access to anyone but
-    /// its owner, SYSTEM and the Administrators group, by its SID (an
-    /// inherited entry too); a null list grants everyone.
-    pub fn others(file: &File) -> Result<Vec<String>, String> {
+    /// Every entry of `file`'s access list, inherited ones too; `None` for a
+    /// null list.
+    pub fn entries(file: &File) -> Result<Option<Vec<Entry>>, String> {
         let (mut owner, mut dacl, mut sd): (PSID, *mut ACL, PSECURITY_DESCRIPTOR) =
             (null_mut(), null_mut(), null_mut());
         // SAFETY: a valid open handle; the out pointers are written by the call.
@@ -122,7 +163,7 @@ mod windows {
         }
         let _sd = Descriptor(sd);
         if dacl.is_null() {
-            return Ok(vec!["Everyone (the file has no access list)".to_string()]);
+            return Ok(None);
         }
         let mut size = ACL_SIZE_INFORMATION {
             AceCount: 0,
@@ -141,7 +182,7 @@ mod windows {
         if ok == 0 {
             return Err("GetAclInformation failed".to_string());
         }
-        let mut others = Vec::new();
+        let mut entries = Vec::new();
         for i in 0..size.AceCount {
             let mut ace = null_mut();
             // SAFETY: `i` is below the list's count.
@@ -150,28 +191,27 @@ mod windows {
             }
             // SAFETY: every entry starts with its header.
             let header = unsafe { &*(ace as *const ACE_HEADER) };
-            // A deny entry takes access away; any other kind of grant is refused.
-            if header.AceType == DENIED {
-                continue;
-            }
-            if header.AceType != ALLOWED {
-                others.push(format!("an entry of type {}", header.AceType));
-                continue;
-            }
-            // SAFETY: an allowed entry is an ACCESS_ALLOWED_ACE, its SID in place at SidStart.
-            let sid =
-                unsafe { (&raw const (*(ace as *const ACCESS_ALLOWED_ACE)).SidStart) as PSID };
-            // SAFETY: both SIDs are valid for the descriptor's life.
-            let mine = unsafe {
-                EqualSid(sid, owner) != 0
-                    || IsWellKnownSid(sid, WinLocalSystemSid) != 0
-                    || IsWellKnownSid(sid, WinBuiltinAdministratorsSid) != 0
-            };
-            if !mine {
-                others.push(sid_string(sid));
-            }
+            entries.push(match header.AceType {
+                DENIED => Entry::Deny,
+                ALLOWED => {
+                    // SAFETY: an allowed entry is an ACCESS_ALLOWED_ACE, its SID in place at SidStart.
+                    let sid = unsafe {
+                        (&raw const (*(ace as *const ACCESS_ALLOWED_ACE)).SidStart) as PSID
+                    };
+                    // SAFETY: both SIDs are valid for the descriptor's life.
+                    unsafe {
+                        Entry::Allow {
+                            sid: sid_string(sid),
+                            owner: EqualSid(sid, owner) != 0,
+                            system: IsWellKnownSid(sid, WinLocalSystemSid) != 0,
+                            admins: IsWellKnownSid(sid, WinBuiltinAdministratorsSid) != 0,
+                        }
+                    }
+                }
+                other => Entry::Other(other),
+            });
         }
-        Ok(others)
+        Ok(Some(entries))
     }
 
     fn sid_string(sid: PSID) -> String {
@@ -187,5 +227,71 @@ mod windows {
         // SAFETY: allocated by ConvertSidToStringSidW, freed once.
         unsafe { LocalFree(text as _) };
         s
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Entry, judge};
+    use std::path::Path;
+
+    fn allow(sid: &str, owner: bool, system: bool, admins: bool) -> Entry {
+        Entry::Allow {
+            sid: sid.into(),
+            owner,
+            system,
+            admins,
+        }
+    }
+
+    const FILE: &str = r"C:\Users\ci\AppData\Roaming\optokens\token";
+
+    #[test]
+    fn a_dacl_of_the_owner_system_and_administrators_alone_is_private() {
+        let each_alone = vec![
+            allow("S-1-5-21-1-1001", true, false, false),
+            allow("S-1-5-18", false, true, false),
+            allow("S-1-5-32-544", false, false, true),
+            Entry::Deny,
+        ];
+        assert_eq!(judge(Path::new(FILE), Ok(Some(each_alone))), Ok(()));
+    }
+
+    #[test]
+    fn any_other_grant_is_refused_naming_it_and_the_icacls_that_strips_it() {
+        let dacl = vec![
+            allow("S-1-5-21-1-1001", true, false, false),
+            allow("S-1-5-32-545", false, false, false),
+            Entry::Other(5),
+        ];
+        let refused = judge(Path::new(FILE), Ok(Some(dacl))).unwrap_err();
+        assert_eq!(refused.kind, Some("token_file_open"));
+        assert_eq!(
+            refused.fault,
+            format!(
+                "the token file `{FILE}` grants access to S-1-5-32-545, an entry of type 5: only its owner, SYSTEM and the Administrators group may have it"
+            )
+        );
+        assert_eq!(
+            refused.fix,
+            format!(
+                "icacls \"{FILE}\" /inheritance:r /grant:r \"%USERNAME%:F\" /remove \"*S-1-5-32-545\""
+            )
+        );
+    }
+
+    #[test]
+    fn a_null_or_unreadable_dacl_is_refused() {
+        let null = judge(Path::new(FILE), Ok(None)).unwrap_err();
+        assert!(null.fault.contains("grants access to Everyone"), "{null:?}");
+        assert_eq!(
+            null.fix,
+            format!("icacls \"{FILE}\" /inheritance:r /grant:r \"%USERNAME%:F\"")
+        );
+        let unread = judge(Path::new(FILE), Err("error 5".into())).unwrap_err();
+        assert_eq!(
+            unread.fault,
+            format!("cannot read the access list of the token file `{FILE}`: error 5")
+        );
     }
 }

@@ -14,10 +14,13 @@ mod tailscale;
 #[cfg_attr(not(test), allow(dead_code))]
 mod version;
 
+use std::io::Write;
+
 agent_help::binary!("optokens");
 
 fn main() {
     let (answer, code) = cli::run(std::env::args_os());
-    println!("{}", answer.trim_end());
+    // A reader that closes early (`| head`) ends the answer quietly: println! would panic.
+    let _ = writeln!(std::io::stdout().lock(), "{}", answer.trim_end());
     std::process::exit(code);
 }
