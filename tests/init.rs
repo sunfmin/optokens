@@ -27,7 +27,7 @@ fn host(op: Value) -> Host {
 }
 
 /// `init args`, its link submitted with [`TOKEN`]: how it ended, its stderr
-/// the link, and how it ended.
+/// with the link it printed.
 fn init(host: &Host, args: &[&str], env: &[(&str, &str)]) -> Ran {
     let waiting = start(host, &[&["init"], args].concat(), env);
     let (status, page) = waiting.request("GET", "");
