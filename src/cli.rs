@@ -160,10 +160,7 @@ pub(crate) fn run(args: impl IntoIterator<Item = std::ffi::OsString>) -> (String
         Ok(cli) => cli,
         Err(e) if !e.use_stderr() => e.exit(),
         Err(e) => {
-            return refused(vec![Refusal::new(
-                e.to_string().trim(),
-                "run `optokens --help`",
-            )]);
+            return refused(Refusal::new(e.to_string().trim(), "run `optokens --help`"));
         }
     };
     match cli.command {
@@ -171,17 +168,17 @@ pub(crate) fn run(args: impl IntoIterator<Item = std::ffi::OsString>) -> (String
         Cmd::Help { topic: None } => (help.index().expect("checked"), EXIT_OK),
         Cmd::Help { topic: Some(topic) } => match help.topic_help(&topic) {
             Ok(markdown) => (markdown, EXIT_OK),
-            Err(e) => refused(vec![Refusal::new(
+            Err(e) => refused(Refusal::new(
                 e.to_string().trim(),
                 "run `optokens --help` for the topics",
-            )]),
+            )),
         },
     }
 }
 
-/// A command that could not run: every fault and its fix, exit {EXIT_ERROR}.
-fn refused(refusals: Vec<Refusal>) -> (String, i32) {
-    (pretty(&json!({ "error": refusals })), EXIT_ERROR)
+/// A command that could not run: its fault and fix, as the one entry of `error`, exit {EXIT_ERROR}.
+fn refused(refusal: Refusal) -> (String, i32) {
+    (pretty(&json!({ "error": [refusal] })), EXIT_ERROR)
 }
 
 pub(crate) fn pretty(value: &Value) -> String {

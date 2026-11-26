@@ -3,7 +3,7 @@
 use std::ffi::OsStr;
 use std::io::Read;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 /// `name` in the first directory of `path` that holds it as a file.
@@ -18,18 +18,12 @@ pub fn find(name: &str, path: Option<&OsStr>) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// What a finished program printed, and its exit code.
+/// What a finished program printed, and how it exited.
 #[derive(Debug)]
 pub struct Ran {
-    pub code: Option<i32>,
+    pub status: ExitStatus,
     pub stdout: String,
     pub stderr: String,
-}
-
-impl Ran {
-    pub fn ok(&self) -> bool {
-        self.code == Some(0)
-    }
 }
 
 /// Runs `command`, its stdin empty, and waits at most `bound` for it to
@@ -63,7 +57,7 @@ pub fn bounded(mut command: Command, bound: Duration) -> Result<Ran, String> {
         }
     };
     Ok(Ran {
-        code: status.code(),
+        status,
         stdout: out.join().unwrap_or_default(),
         stderr: err.join().unwrap_or_default(),
     })

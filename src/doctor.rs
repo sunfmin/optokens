@@ -83,12 +83,13 @@ fn run(path: &std::path::Path, args: &[&str]) -> Result<Ran, String> {
     let mut command = Command::new(path);
     command.args(args).env_remove(account::TOKEN_ENV);
     let ran = program::bounded(command, BOUND)?;
-    if ran.ok() {
+    if ran.status.success() {
         Ok(ran)
     } else {
         Err(format!(
             "it exited {}: {}",
-            ran.code
+            ran.status
+                .code()
                 .map_or("on a signal".to_string(), |c| c.to_string()),
             ran.stderr.trim()
         ))
@@ -104,9 +105,9 @@ fn check_op(world: &World, findings: &mut Vec<Refusal>) -> Value {
         ));
         return Value::Null;
     };
-    match run(&path, op::VERSION) {
-        Ok(ran) => json!({ "path": path, "version": ran.stdout.trim() }),
-        Err(why) => {
+    let version = run(&path, op::VERSION)
+        .map(|ran| ran.stdout.trim().to_string())
+        .map_err(|why| {
             findings.push(Refusal::of(
                 &Finding::OpUnanswered,
                 format!("`{} --version`: {why}", path.display()),
@@ -114,10 +115,10 @@ fn check_op(world: &World, findings: &mut Vec<Refusal>) -> Value {
                     "run `{} --version` and repair the install it shows",
                     path.display()
                 ),
-            ));
-            json!({ "path": path, "version": null })
-        }
-    }
+            ))
+        })
+        .ok();
+    json!({ "path": path, "version": version })
 }
 
 /// The tailnet address and the cert domains, or null for each not found.
@@ -132,17 +133,16 @@ fn check_tailscale(world: &World, findings: &mut Vec<Refusal>) -> (Value, Value)
     };
     let address = run(&path, tailscale::IP)
         .and_then(|ran| tailscale::address(&ran.stdout).ok_or("it printed no address".into()));
-    let address = match address {
-        Ok(address) => json!({ "path": path, "address": address }),
-        Err(why) => {
+    let address = address
+        .map_err(|why| {
             findings.push(Refusal::of(
                 &Finding::NoTailnetAddress,
                 format!("`tailscale ip`: {why}"),
                 "run `tailscale up`",
-            ));
-            json!({ "path": path, "address": null })
-        }
-    };
+            ))
+        })
+        .ok();
+    let address = json!({ "path": path, "address": address });
     let domains =
         run(&path, tailscale::STATUS).and_then(|ran| tailscale::cert_domains(&ran.stdout));
     let cert = match domains {

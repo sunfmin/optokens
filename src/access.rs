@@ -120,10 +120,9 @@ mod windows {
         ConvertSidToStringSidW, GetSecurityInfo, SE_FILE_OBJECT,
     };
     use windows_sys::Win32::Security::{
-        ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
-        DACL_SECURITY_INFORMATION, EqualSid, GetAce, GetAclInformation, IsWellKnownSid,
-        OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, WinBuiltinAdministratorsSid,
-        WinLocalSystemSid,
+        ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, EqualSid, GetAce,
+        IsWellKnownSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+        WinBuiltinAdministratorsSid, WinLocalSystemSid,
     };
 
     /// `ACCESS_ALLOWED_ACE_TYPE` and `ACCESS_DENIED_ACE_TYPE`.
@@ -165,25 +164,9 @@ mod windows {
         if dacl.is_null() {
             return Ok(None);
         }
-        let mut size = ACL_SIZE_INFORMATION {
-            AceCount: 0,
-            AclBytesInUse: 0,
-            AclBytesFree: 0,
-        };
-        // SAFETY: `dacl` is the list GetSecurityInfo returned; `size` is its class's struct.
-        let ok = unsafe {
-            GetAclInformation(
-                dacl,
-                (&mut size as *mut ACL_SIZE_INFORMATION).cast(),
-                size_of::<ACL_SIZE_INFORMATION>() as u32,
-                AclSizeInformation,
-            )
-        };
-        if ok == 0 {
-            return Err("GetAclInformation failed".to_string());
-        }
         let mut entries = Vec::new();
-        for i in 0..size.AceCount {
+        // SAFETY: `dacl` is the list GetSecurityInfo returned; its header counts its entries.
+        for i in 0..u32::from(unsafe { (*dacl).AceCount }) {
             let mut ace = null_mut();
             // SAFETY: `i` is below the list's count.
             if unsafe { GetAce(dacl, i, &mut ace) } == 0 {
