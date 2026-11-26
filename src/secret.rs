@@ -450,10 +450,11 @@ pub fn merge(name: &Name, existing: Option<&Secret>, put: &Put) -> Result<Secret
     };
     Ok(Secret {
         kind,
-        description: put
-            .description
-            .clone()
-            .or_else(|| existing.and_then(|e| e.description.clone())),
+        // An empty one clears it: the notes it is stored as are then empty.
+        description: match &put.description {
+            Some(given) => Some(given.clone()).filter(|d| !d.is_empty()),
+            None => existing.and_then(|e| e.description.clone()),
+        },
         meta: put
             .meta
             .clone()
@@ -725,6 +726,19 @@ mod tests {
             merge(&name(), Some(&stored), &Put::default()).unwrap(),
             stored,
             "a put of nothing changes nothing"
+        );
+        let described = Secret {
+            description: Some("old".into()),
+            ..stored.clone()
+        };
+        let cleared = Put {
+            description: Some(String::new()),
+            ..Put::default()
+        };
+        assert_eq!(
+            merge(&name(), Some(&described), &cleared).unwrap(),
+            stored,
+            "an empty description clears it"
         );
     }
 

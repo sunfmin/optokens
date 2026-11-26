@@ -13,7 +13,7 @@ A labeled value inside a Secret, addressed by its label. Most Secrets have one; 
 _Avoid_: sub-secret, key/value pair.
 
 **Description**:
-An agent-written note of what a Secret is for, set when it is first `put` and shown by `list`: its reader is a later agent recalling the Secret's purpose.
+An agent-written note of what a Secret is for, set when it is first `put` and shown by `list`: its reader is a later agent recalling the Secret's purpose. Stored as the vault item's notes, which 1Password shows in its list.
 _Avoid_: comment, label.
 
 **Meta**:

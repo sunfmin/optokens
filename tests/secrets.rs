@@ -586,13 +586,14 @@ fn without_a_token_nothing_reaches_op() {
 }
 
 /// An item as an earlier optokens wrote it: titled `<service>/<account>`, no
-/// name in its section.
+/// name in its section, its Description in its section, its notes another's.
 fn old_bark(id: &str) -> Value {
     stored(
         id,
         "bark/default",
         json!(["optokens"]),
         json!([
+            { "id": "notesPlain", "type": "STRING", "purpose": "NOTES", "label": "notesPlain", "value": "an old note" },
             field("fields", "URL", "https://push/x"),
             field("optokens", "kind", "static"),
             field("optokens", "shape", "fields"),
@@ -659,9 +660,20 @@ fn a_secret_titled_with_a_slash_is_found_by_every_command_and_put_retitles_it_in
             ("account", "default"),
             ("kind", "static"),
             ("shape", "fields"),
-            ("description", "phone push")
         ]
         .map(|(l, v)| (l.to_string(), v.to_string()))
+    );
+    let notes: Vec<Value> = items()[0]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["purpose"] == "NOTES")
+        .map(|f| f["value"].clone())
+        .collect();
+    assert_eq!(
+        notes,
+        [json!("phone push")],
+        "the Description moves into the notes"
     );
     assert_eq!(
         run(&host, &["put", "bark", "--set", "URL=https://push/x"]).json()["changed"],
@@ -981,11 +993,11 @@ fn put_keeps_the_tags_sections_and_field_order_it_does_not_own() {
     assert_eq!(
         held,
         [
+            (Value::Null, json!("notesPlain")),
             (json!("fields"), json!("C")),
             (json!("fields"), json!("A")),
             (json!("fields"), json!("B")),
             (json!("fields"), json!("D")),
-            (Value::Null, json!("notesPlain")),
             (json!("mytokens"), json!("origin")),
         ]
     );
@@ -994,7 +1006,11 @@ fn put_keeps_the_tags_sections_and_field_order_it_does_not_own() {
         .unwrap()
         .iter()
         .find(|f| f["purpose"] == "NOTES");
-    assert_eq!(notes.unwrap()["value"], "a note");
+    assert_eq!(
+        notes.unwrap()["value"],
+        "a note",
+        "the notes are the Description, kept"
+    );
     assert_eq!(
         run(&host, &["env", "deploy"]).stdout,
         "export C='3'\nexport A='10'\nexport B='2'\nexport D='4'\n"
