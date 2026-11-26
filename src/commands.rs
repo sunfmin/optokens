@@ -6,24 +6,52 @@ use crate::cli::Answer;
 use crate::refusal::Refusal;
 use crate::secret::{self, Kind, Name, Put};
 use crate::store::Store;
-use serde_json::json;
+use serde_json::{Value, json};
 
-/// What `put` was given on its command line.
+// `put`'s command line; its help is the manual's.
+#[derive(clap::Args)]
 pub struct PutArgs {
-    pub service: String,
-    pub account: String,
-    pub kind: Option<Kind>,
-    pub description: Option<String>,
-    pub set: Vec<String>,
-    pub field_from_stdin: Option<String>,
-    /// `--fields` or `--show`: values a person enters on a one-time link.
-    pub link: bool,
+    /// The service the Secret is for, a slug such as `cloudflare`.
+    #[arg(verbatim_doc_comment)]
+    service: String,
+    /// The account, when the service has several.
+    #[arg(long, default_value = secret::DEFAULT_ACCOUNT, verbatim_doc_comment)]
+    account: String,
+    /// The kind of a new Secret; a stored Secret's kind never changes.
+    #[arg(long, value_enum, verbatim_doc_comment)]
+    kind: Option<Kind>,
+    /// What the Secret is for, for a later agent that reads `list`.
+    #[arg(long, verbatim_doc_comment)]
+    description: Option<String>,
+    /// `NAME=value`: a Field that is not secret; repeat it for several.
+    #[arg(long, value_name = "NAME=value", verbatim_doc_comment)]
+    set: Vec<String>,
+    /// The label of the one Field whose value is all of stdin, piped in by a command.
+    #[arg(long, value_name = "Label", verbatim_doc_comment)]
+    field_from_stdin: Option<String>,
+    /// Fields a person enters on a one-time link: refused, as this optokens does not serve the link yet.
+    #[arg(long, value_name = "Label,...", verbatim_doc_comment)]
+    fields: Option<String>,
+    /// Fields of `--fields` shown as typed: refused with `--fields`.
+    #[arg(long, value_name = "Label,...", verbatim_doc_comment)]
+    show: Option<String>,
 }
 
-/// Upserts the Fields `args` names. `stdin` is whether stdin is a terminal,
-/// and how to read it whole: it is read only for `--field-from-stdin`, and
-/// never when it is a terminal.
+/// Upserts the Fields `args` names. `terminal` is whether stdin is one, and
+/// `read` reads it whole: only for `--field-from-stdin`, never a terminal.
 pub fn put(env: &Env, args: PutArgs, terminal: bool, read: impl FnOnce() -> Vec<u8>) -> Answer {
+    match put_secret(env, args, terminal, read) {
+        Ok(answer) => Answer::json(&answer),
+        Err(faults) => Answer::refused(faults),
+    }
+}
+
+fn put_secret(
+    env: &Env,
+    args: PutArgs,
+    terminal: bool,
+    read: impl FnOnce() -> Vec<u8>,
+) -> Result<Value, Vec<Refusal>> {
     let mut faults = Vec::new();
     let name = Name::new(&args.service, &args.account)
         .map_err(|r| faults.push(r))
@@ -35,11 +63,11 @@ pub fn put(env: &Env, args: PutArgs, terminal: bool, read: impl FnOnce() -> Vec<
             Err(refusal) => faults.push(refusal),
         }
     }
-    if args.link {
+    if args.fields.is_some() || args.show.is_some() {
         faults.push(Refusal::of(
             &secret::Fault::NeedsLink,
             "`--fields` and `--show` take values a person enters on a one-time link, which this optokens does not serve yet",
-            "pipe a value a command makes with `--field-from-stdin <Label>`, or `--set \"NAME=value\"` one that is not secret",
+            secret::NEEDS_LINK_FIX,
         ));
     }
     if let Some(label) = &args.field_from_stdin {
@@ -49,33 +77,24 @@ pub fn put(env: &Env, args: PutArgs, terminal: bool, read: impl FnOnce() -> Vec<
         }
     }
     let (Some(name), true) = (name, faults.is_empty()) else {
-        return Answer::refused(faults);
+        return Err(faults);
     };
     let put = Put {
         kind: args.kind,
         description: args.description,
         fields,
     };
-    let store = match Store::open(env) {
-        Ok(store) => store,
-        Err(faults) => return Answer::refused(faults),
-    };
-    let found = match store.find(&name) {
-        Ok(found) => found,
-        Err(refusal) => return Answer::refused(vec![refusal]),
-    };
+    let store = Store::open(env)?;
+    let found = store.find(&name).map_err(|r| vec![r])?;
     let existing = found.as_ref().map(|f| &f.secret);
-    let merged = match secret::merge(&name, existing, &put) {
-        Ok(merged) => merged,
-        Err(faults) => return Answer::refused(faults),
-    };
+    let merged = secret::merge(&name, existing, &put)?;
     let changed = existing != Some(&merged);
-    if changed
-        && let Err(refusal) = store.write(found.as_ref().map(|f| f.id.as_str()), &name, &merged)
-    {
-        return Answer::refused(vec![refusal]);
+    if changed {
+        store
+            .write(found.as_ref().map(|f| f.id.as_str()), &name, &merged)
+            .map_err(|r| vec![r])?;
     }
-    Answer::json(&json!({
+    Ok(json!({
         "secret": name.title(),
         "changed": changed,
         "kind": merged.kind.name(),

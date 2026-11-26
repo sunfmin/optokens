@@ -125,9 +125,8 @@ fn layout(item: &Value) -> Result<(Name, Secret), String> {
         return Err(format!("its section `{META}` has a field `{stray}`"));
     }
     let kind = one(KIND)?.ok_or(format!("its section `{META}` has no `{KIND}`"))?;
-    let kind = Kind::parse(&kind).ok_or(format!(
-        "its `{KIND}` is `{kind}`, neither static nor profile"
-    ))?;
+    let kind = <Kind as clap::ValueEnum>::from_str(&kind, false)
+        .map_err(|_| format!("its `{KIND}` is `{kind}`, neither static nor profile"))?;
     let description = one(DESCRIPTION)?;
     let values = match one(SHAPE)?.as_deref() {
         Some(SHAPE_SINGLE) => match values.as_slice() {
@@ -218,31 +217,19 @@ pub fn ours(summaries: &Value) -> Vec<String> {
         .collect()
 }
 
+// What `op` keeps of a template, as the stand-in keeps it: for the round trip.
+#[cfg(test)]
+#[path = "../examples/standin/keep.rs"]
+mod standin;
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    /// The item as `op` keeps it: ids given, the category's notes field
-    /// added, sections named in each field, and an empty value left out.
+    /// The item as `op` keeps it.
     fn stored(template: &Value) -> Value {
-        let mut item = template.clone();
-        item["id"] = json!("abc123");
-        item["vault"] = json!({ "id": "v1", "name": "optokens" });
-        let mut fields = vec![
-            json!({ "id": "notesPlain", "type": "STRING", "purpose": "NOTES", "label": "notesPlain" }),
-        ];
-        for f in template["fields"].as_array().unwrap() {
-            let mut f = f.clone();
-            let id = f["section"]["id"].clone();
-            f["section"] = json!({ "id": id, "label": id });
-            if f["value"] == "" {
-                f.as_object_mut().unwrap().remove("value");
-            }
-            fields.push(f);
-        }
-        item["fields"] = json!(fields);
-        item
+        super::standin::keep(template, "abc123", "optokens")
     }
 
     fn secret() -> (Name, Secret) {

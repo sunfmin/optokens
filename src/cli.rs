@@ -6,7 +6,7 @@ use crate::commands;
 use crate::doctor::{self, Finding, World};
 use crate::item;
 use crate::refusal::Refusal;
-use crate::secret::{self, Kind};
+use crate::secret;
 use agent_help::{Help, Topic};
 use clap::{FromArgMatches, Parser, Subcommand};
 use serde_json::{Value, json};
@@ -143,32 +143,7 @@ enum Cmd {
     /// - `--set` puts its value on the command line, where `ps` shows it: only for a value that is not secret (a URL, a model, a user name).
     /// - `put` never drops a Field, nor changes a kind or a single value into Fields: `rm`, then `put` the Secret again.
     #[command(next_help_heading = "Run by the agent", verbatim_doc_comment)]
-    Put {
-        /// The service the Secret is for, a slug such as `cloudflare`.
-        #[arg(verbatim_doc_comment)]
-        service: String,
-        /// The account, when the service has several.
-        #[arg(long, default_value = secret::DEFAULT_ACCOUNT, verbatim_doc_comment)]
-        account: String,
-        /// The kind of a new Secret; a stored Secret's kind never changes.
-        #[arg(long, value_enum, verbatim_doc_comment)]
-        kind: Option<Kind>,
-        /// What the Secret is for, for a later agent that reads `list`.
-        #[arg(long, verbatim_doc_comment)]
-        description: Option<String>,
-        /// `NAME=value`: a Field that is not secret; repeat it for several.
-        #[arg(long, value_name = "NAME=value", verbatim_doc_comment)]
-        set: Vec<String>,
-        /// The label of the one Field whose value is all of stdin, piped in by a command.
-        #[arg(long, value_name = "Label", verbatim_doc_comment)]
-        field_from_stdin: Option<String>,
-        /// Fields a person enters on a one-time link: refused, as this optokens does not serve the link yet.
-        #[arg(long, value_name = "Label,...", verbatim_doc_comment)]
-        fields: Option<String>,
-        /// Fields of `--fields` shown as typed: refused with `--fields`.
-        #[arg(long, value_name = "Label,...", verbatim_doc_comment)]
-        show: Option<String>,
-    },
+    Put(commands::PutArgs),
     /// Prints a Secret's value alone, with no newline, for `$(optokens get ...)`; or with `--json` the whole Secret.
     ///
     /// ## When to run it
@@ -441,25 +416,7 @@ pub(crate) fn run(args: impl IntoIterator<Item = std::ffi::OsString>) -> Answer 
                 "run `optokens --help` for the topics",
             )]),
         },
-        Cmd::Put {
-            service,
-            account,
-            kind,
-            description,
-            set,
-            field_from_stdin,
-            fields,
-            show,
-        } => {
-            let args = commands::PutArgs {
-                service,
-                account,
-                kind,
-                description,
-                set,
-                field_from_stdin,
-                link: fields.is_some() || show.is_some(),
-            };
+        Cmd::Put(args) => {
             let stdin = std::io::stdin();
             let terminal = std::io::IsTerminal::is_terminal(&stdin);
             commands::put(&env, args, terminal, || {

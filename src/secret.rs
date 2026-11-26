@@ -8,6 +8,9 @@ use serde_json::{Value, json};
 /// The account a Secret is under when `--account` is not given.
 pub const DEFAULT_ACCOUNT: &str = "default";
 
+/// What to do instead of entering a value on the one-time link.
+pub const NEEDS_LINK_FIX: &str = "pipe a value a command makes with `--field-from-stdin <Label>`, or `--set \"NAME=value\"` one that is not secret";
+
 /// Why a command about a Secret refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, agent_help::Help)]
 pub enum Fault {
@@ -62,12 +65,6 @@ impl Kind {
             Kind::Static => "static",
             Kind::Profile => "profile",
         }
-    }
-
-    pub fn parse(name: &str) -> Option<Kind> {
-        [Kind::Static, Kind::Profile]
-            .into_iter()
-            .find(|k| k.name() == name)
     }
 }
 
@@ -228,7 +225,7 @@ pub fn merge(name: &Name, existing: Option<&Secret>, put: &Put) -> Result<Secret
         faults.push(Refusal::of(
             &Fault::NeedsLink,
             format!("`put {title}` names no Field to store: a value a person knows is entered on a one-time link, which this optokens does not serve yet"),
-            "pipe a value a command makes with `--field-from-stdin <Label>`, or `--set \"NAME=value\"` one that is not secret",
+            NEEDS_LINK_FIX,
         ));
     }
     let kind = match (existing, put.kind) {
@@ -293,33 +290,29 @@ pub fn merge(name: &Name, existing: Option<&Secret>, put: &Put) -> Result<Secret
     if !faults.is_empty() {
         return Err(faults);
     }
-    let mut fields = match existing.map(|e| &e.values) {
-        Some(Values::Fields(fields)) => fields.clone(),
-        Some(Values::Single(value)) => {
-            return Ok(Secret {
-                kind,
-                description: put
-                    .description
-                    .clone()
-                    .or_else(|| existing.and_then(|e| e.description.clone())),
-                values: Values::Single(value.clone()),
-            });
+    let values = match existing.map(|e| &e.values) {
+        Some(Values::Single(value)) => Values::Single(value.clone()),
+        stored => {
+            let mut fields = match stored {
+                Some(Values::Fields(fields)) => fields.clone(),
+                _ => Vec::new(),
+            };
+            for (label, value) in &put.fields {
+                match fields.iter_mut().find(|(l, _)| l == label) {
+                    Some(field) => field.1 = value.clone(),
+                    None => fields.push((label.clone(), value.clone())),
+                }
+            }
+            Values::Fields(fields)
         }
-        None => Vec::new(),
     };
-    for (label, value) in &put.fields {
-        match fields.iter_mut().find(|(l, _)| l == label) {
-            Some(field) => field.1 = value.clone(),
-            None => fields.push((label.clone(), value.clone())),
-        }
-    }
     Ok(Secret {
         kind,
         description: put
             .description
             .clone()
             .or_else(|| existing.and_then(|e| e.description.clone())),
-        values: Values::Fields(fields),
+        values,
     })
 }
 
@@ -372,12 +365,7 @@ fn list_labels(fields: &[(String, String)]) -> String {
 
 /// The whole Secret, as `get --json` prints it.
 pub fn to_json(name: &Name, secret: &Secret) -> Value {
-    let mut answer = json!({
-        "service": name.service(),
-        "account": name.account(),
-        "kind": secret.kind.name(),
-        "description": secret.description,
-    });
+    let mut answer = head(name, secret);
     match &secret.values {
         Values::Single(value) => answer["value"] = json!(value),
         Values::Fields(fields) => {
@@ -390,12 +378,18 @@ pub fn to_json(name: &Name, secret: &Secret) -> Value {
 
 /// One Secret as `list` shows it: never a value.
 pub fn summary(name: &Name, secret: &Secret) -> Value {
+    let mut answer = head(name, secret);
+    answer["fields"] = json!(secret.labels());
+    answer
+}
+
+/// What `get --json` and `list` both say of a Secret first.
+fn head(name: &Name, secret: &Secret) -> Value {
     json!({
         "service": name.service(),
         "account": name.account(),
         "kind": secret.kind.name(),
         "description": secret.description,
-        "fields": secret.labels(),
     })
 }
 
