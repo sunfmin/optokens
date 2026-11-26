@@ -147,7 +147,7 @@ fn checks(store: &Store) -> Result<(), Refusal> {
         values: Values::Single(link::random_hex(16)),
     };
     store
-        .write(left.as_ref().map(|f| f.id.as_str()), &probe, &secret)
+        .write(left.as_ref(), &probe, &secret)
         .map_err(by(Check::ProbeWritten))?;
     let back = store.find(&probe).map_err(by(Check::ProbeReadBack))?;
     let Some(back) = back.filter(|found| found.secret == secret) else {

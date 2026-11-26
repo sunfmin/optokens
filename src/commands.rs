@@ -188,7 +188,7 @@ fn put_secret(
     let changed = existing != Some(&merged) || stale;
     if changed {
         store
-            .write(found.as_ref().map(|f| f.id.as_str()), &name, &merged)
+            .write(found.as_ref(), &name, &merged)
             .map_err(|r| vec![r])?;
     }
     Ok(json!({
