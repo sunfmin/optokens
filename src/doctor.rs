@@ -82,7 +82,7 @@ pub fn doctor(world: &World) -> Value {
 fn run(path: &std::path::Path, args: &[&str]) -> Result<Ran, String> {
     let mut command = Command::new(path);
     command.args(args).env_remove(account::TOKEN_ENV);
-    let ran = program::bounded(command, BOUND)?;
+    let ran = program::bounded(command, None, BOUND)?;
     if ran.status.success() {
         Ok(ran)
     } else {

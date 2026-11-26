@@ -4,10 +4,14 @@
 mod access;
 mod account;
 mod cli;
+mod commands;
 mod doctor;
+mod item;
 mod op;
 mod program;
 mod refusal;
+mod secret;
+mod store;
 mod tailscale;
 
 // build.rs runs it to stamp the version; compiled here too, for its tests.
@@ -19,8 +23,9 @@ use std::io::Write;
 agent_help::binary!("optokens");
 
 fn main() {
-    let (answer, code) = cli::run(std::env::args_os());
-    // A reader that closes early (`| head`) ends the answer quietly: println! would panic.
-    let _ = writeln!(std::io::stdout().lock(), "{}", answer.trim_end());
-    std::process::exit(code);
+    let answer = cli::run(std::env::args_os());
+    // A reader that closes early (`| head`) ends the answer quietly: print! would panic.
+    let _ = std::io::stdout().lock().write_all(answer.stdout.as_bytes());
+    let _ = std::io::stderr().lock().write_all(answer.stderr.as_bytes());
+    std::process::exit(answer.code);
 }

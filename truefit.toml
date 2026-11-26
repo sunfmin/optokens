@@ -16,22 +16,19 @@ check = ["test"]
 name = "get-and-env-errors-on-stderr"
 says = "They send their errors to stderr and leave stdout empty on an error, so `$(…)` and `eval` never capture an error."
 source = "docs/adr/0001-one-json-object-but-get-and-env.md:5"
-kept = "get and env are not built yet; their tests check it"
-kept_until = "2027-02-28"
+check = ["test"]
 
 [[promise]]
 name = "values-over-op-pipes"
 says = "A Secret's values go in and out only over `op`'s stdin and stdout (JSON item templates), and the service account's token goes only in the child's environment."
 source = "docs/adr/0002-reach-1password-through-op.md:5"
-kept = "no command hands op a value or the token yet; doctor's test checks it gives no program the token"
-kept_until = "2027-02-28"
+check = ["test"]
 
 [[promise]]
 name = "no-value-in-argv-or-temp-file"
 says = "A secret value is never in any process's command line and never in a temporary file."
 source = "docs/adr/0002-reach-1password-through-op.md:5"
-kept = "no command handles a secret value yet; the first that does carries its test against the op stand-in's recorded calls"
-kept_until = "2027-02-28"
+check = ["test"]
 
 [[promise]]
 name = "one-token-lookup"
@@ -56,8 +53,7 @@ check = ["test"]
 name = "env-posix-exports"
 says = "`env` prints `export NAME='value'` lines on every OS, for sh, bash and zsh, Git Bash and WSL on Windows included, as mytokens prints them (ADR 0001). There is no PowerShell form yet: `env --shell powershell` is added when someone needs it."
 source = "docs/adr/0005-env-prints-posix-exports.md:3"
-kept = "env is not built yet; its test checks it"
-kept_until = "2027-02-28"
+check = ["test"]
 
 [[promise]]
 name = "a-person-enters-on-a-link"
@@ -65,3 +61,27 @@ says = "`put --fields` and `init` print a one-time link and wait for its one sub
 source = "docs/adr/0007-a-person-enters-a-value-on-a-one-time-link.md:5"
 kept = "put and init are not built yet; their tests check it"
 kept_until = "2027-02-28"
+
+[[promise]]
+name = "no-value-in-argv-or-temp-file-invariant"
+says = "A secret's value is never in any process's argv and never written to a temporary file: it reaches `op` only on its stdin, and leaves it only on its stdout (`src/op.rs` builds every `op` command line)."
+source = "CLAUDE.md:8"
+check = ["test"]
+
+[[promise]]
+name = "item-read-back-exactly"
+says = "Reading an item back gives exactly the Secret that was stored."
+source = "docs/adr/0008-one-item-per-secret-metadata-in-its-own-section.md:7"
+check = ["test"]
+
+[[promise]]
+name = "foreign-item-refused"
+says = "An item without the `optokens` tag, or whose `optokens` section is not this shape, is refused by name, never guessed at."
+source = "docs/adr/0008-one-item-per-secret-metadata-in-its-own-section.md:7"
+check = ["test"]
+
+[[promise]]
+name = "label-never-collides-with-metadata"
+says = "Metadata in a section of its own: chosen, because a user's Field may be called `kind` or `description` (a Profile's environment variable); in its own section a label never collides with it."
+source = "docs/adr/0008-one-item-per-secret-metadata-in-its-own-section.md:13"
+check = ["test"]

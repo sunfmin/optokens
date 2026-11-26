@@ -16,6 +16,11 @@
     "sentence": "`optokens --help` is the manual and its only copy; keep it true whenever behaviour changes.",
     "source": "CLAUDE.md:3"
   },
+  "69eebc175572": {
+    "mark": "promise",
+    "sentence": "Metadata in a section of its own: chosen, because a user's Field may be called `kind` or `description` (a Profile's environment variable); in its own section a label never collides with it.",
+    "source": "docs/adr/0008-one-item-per-secret-metadata-in-its-own-section.md:13"
+  },
   "756bd25d8a81": {
     "mark": "promise",
     "sentence": "The token is `OP_SERVICE_ACCOUNT_TOKEN` when set, else `$XDG_CONFIG_HOME/optokens/token` (default `~/.config/optokens/token`). One function finds it, and every command calls it.",
@@ -50,6 +55,12 @@
     "mark": "promise",
     "sentence": "`env` prints `export NAME='value'` lines on every OS, for sh, bash and zsh, Git Bash and WSL on Windows included, as mytokens prints them (ADR 0001). There is no PowerShell form yet: `env --shell powershell` is added when someone needs it.",
     "source": "docs/adr/0005-env-prints-posix-exports.md:3"
+  },
+  "db45976686a7": {
+    "mark": "not",
+    "sentence": "Decided by the tech lead for Felix, when this storage was planned: 「Chose: a section of its own, because a user Field may be called `kind` or `description` (a Profile's env var); keeping metadata in its own section means a label never collides with it.」",
+    "source": "docs/adr/0008-one-item-per-secret-metadata-in-its-own-section.md:3",
+    "why": "the decision's quoted source; the same promise is registered from line 13 as label-never-collides-with-metadata"
   },
   "f1ddb985d2b9": {
     "mark": "promise",
