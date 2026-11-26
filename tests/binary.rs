@@ -39,11 +39,19 @@ fn version_is_stamped_by_build_rs() {
     let (code, out, _) = optokens(&["--version"]);
     assert_eq!(code, 0);
     let version = out.trim().strip_prefix("optokens ").expect(&out);
-    let release = env!("CARGO_PKG_VERSION");
+    // Built in this repository: the development form `1.2.3+<commits>.g<hash>[.dirty]`,
+    // its release from the nearest version tag (a cut tags, Cargo.toml stays), else
+    // from Cargo.toml's version.
+    let (release, build) = version.split_once('+').expect(version);
+    let numbers: Vec<&str> = release.split('.').collect();
+    let digits = |s: &str, radix| !s.is_empty() && s.chars().all(|c: char| c.is_digit(radix));
     assert!(
-        version == release || version.starts_with(&format!("{release}+")),
+        numbers.len() == 3 && numbers.iter().all(|n| digits(n, 10)),
         "{version}"
     );
+    let build = build.strip_suffix(".dirty").unwrap_or(build);
+    let (commits, hash) = build.split_once(".g").expect(version);
+    assert!(digits(commits, 10) && digits(hash, 16), "{version}");
 }
 
 #[test]
