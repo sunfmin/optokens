@@ -301,8 +301,7 @@ pub fn merge(name: &Name, existing: Option<&Secret>, put: &Put) -> Result<Secret
         return Err(faults);
     }
     let values = match (existing.map(|e| &e.values), &put.value) {
-        (_, Some(value)) => Values::Single(value.clone()),
-        (Some(Values::Single(value)), None) => Values::Single(value.clone()),
+        (_, Some(value)) | (Some(Values::Single(value)), None) => Values::Single(value.clone()),
         stored => {
             let mut fields = match stored.0 {
                 Some(Values::Fields(fields)) => fields.clone(),

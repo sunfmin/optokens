@@ -246,6 +246,11 @@ fn every_piece_of_text_is_escaped() {
     assert!(!body.contains("class=\"about\""), "{body}");
 }
 
+/// A bind that succeeds for the addresses on `interfaces`, answering the address.
+fn on(interfaces: &[IpAddr]) -> impl FnMut(IpAddr) -> Option<IpAddr> + '_ {
+    move |a| interfaces.contains(&a).then_some(a)
+}
+
 fn ip(s: &str) -> IpAddr {
     s.parse().unwrap()
 }
@@ -260,15 +265,15 @@ fn it_listens_on_the_tailnet_address_only_ipv4_first() {
     ];
     let answer = "100.64.0.7\nfd7a:115c::1\n";
     assert_eq!(
-        listen_address(&interfaces, Some(answer)),
+        listen_address(on(&interfaces), Some(answer)),
         Ok(ip("100.64.0.7"))
     );
     assert_eq!(
-        listen_address(&interfaces, Some("fd7a:115c::1\n100.64.0.7\n")),
+        listen_address(on(&interfaces), Some("fd7a:115c::1\n100.64.0.7\n")),
         Ok(ip("100.64.0.7"))
     );
     assert_eq!(
-        listen_address(&interfaces[..3], Some(answer)),
+        listen_address(on(&interfaces[..3]), Some(answer)),
         Ok(ip("fd7a:115c::1"))
     );
 }
@@ -290,7 +295,7 @@ fn without_tailscale_or_a_tailnet_address_nothing_is_stored_and_it_says_what_is_
         ),
     ];
     for (answer, missing, fix) in cases {
-        let refusal = listen_address(&interfaces, answer).unwrap_err();
+        let refusal = listen_address(on(&interfaces), answer).unwrap_err();
         assert!(
             refusal
                 .fault

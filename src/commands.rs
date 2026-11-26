@@ -128,21 +128,25 @@ fn put_secret(
     };
     put.fields
         .extend(asked.iter().map(|l| (l.clone(), String::new())));
-    // Every fault is refused before the link is served.
-    secret::merge(&name, existing, &put)?;
+    // Every fault is refused before the link is served: its values fill
+    // the placeholders of what is merged.
+    let mut merged = secret::merge(&name, existing, &put)?;
     if let Some(endpoint) = endpoint {
         let link = link_for(&name, existing, &put, &asked, &shown);
         let mut values = endpoint.serve(&name, link).map_err(|r| vec![r])?;
-        match &mut put.value {
-            Some(value) => *value = values.pop_first().map(|(_, v)| v).unwrap_or_default(),
-            None => {
-                for (label, value) in put.fields.iter_mut().rev().take(asked.len()) {
-                    *value = values.remove(label).unwrap_or_default();
+        match &mut merged.values {
+            secret::Values::Single(value) => {
+                *value = values.pop_first().map(|(_, v)| v).unwrap_or_default()
+            }
+            secret::Values::Fields(fields) => {
+                for (label, value) in fields.iter_mut() {
+                    if let Some(entered) = values.remove(label) {
+                        *value = entered;
+                    }
                 }
             }
         }
     }
-    let merged = secret::merge(&name, existing, &put)?;
     let changed = existing != Some(&merged);
     if changed {
         store

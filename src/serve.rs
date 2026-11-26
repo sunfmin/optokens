@@ -15,7 +15,7 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::ffi::OsStr;
 use std::io::{Read, Write};
-use std::net::{IpAddr, TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex, mpsc};
@@ -47,18 +47,10 @@ impl Endpoint {
         };
         let answer = ask(&tailscale, tailscale::IP, ASK_BOUND)
             .map_err(|why| link::nothing_stored(no_tailnet_address(&why)))?;
-        let mut bound: Vec<(IpAddr, TcpListener)> = tailscale::addresses(&answer)
-            .filter_map(|a| TcpListener::bind((a, 0)).ok().map(|l| (a, l)))
-            .collect();
-        let interfaces: Vec<IpAddr> = bound.iter().map(|(a, _)| *a).collect();
-        let address = link::listen_address(&interfaces, Some(&answer))?;
-        let at = bound
-            .iter()
-            .position(|(a, _)| *a == address)
-            .expect("the address is one bound");
+        let listener = link::listen_address(|a| TcpListener::bind((a, 0)).ok(), Some(&answer))?;
         Ok(Endpoint {
             tailscale,
-            listener: bound.swap_remove(at).1,
+            listener,
         })
     }
 
@@ -256,13 +248,9 @@ fn read_request(stream: &mut impl Read) -> Result<(String, String, Vec<u8>), u16
         return Err(413);
     }
     let mut body = data[end + 4..].to_vec();
-    while body.len() < length {
-        match stream.read(&mut chunk) {
-            Ok(0) | Err(_) => return Err(400),
-            Ok(n) => body.extend_from_slice(&chunk[..n]),
-        }
-    }
-    body.truncate(length);
+    let have = body.len().min(length);
+    body.resize(length, 0);
+    stream.read_exact(&mut body[have..]).map_err(|_| 400u16)?;
     Ok((method.to_string(), target.to_string(), body))
 }
 
