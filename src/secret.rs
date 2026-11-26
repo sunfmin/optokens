@@ -67,11 +67,42 @@ impl Kind {
     }
 }
 
-/// A Secret's values: a single value, or labelled Fields in their order.
+/// A Secret's values: a single value (always concealed), or labelled Fields
+/// in their order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Values {
     Single(String),
-    Fields(Vec<(String, String)>),
+    Fields(Vec<Field>),
+}
+
+/// One labelled value of a Secret, and how the vault shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Field {
+    pub label: String,
+    pub value: String,
+    pub visibility: Visibility,
+}
+
+impl Field {
+    pub fn new(label: &str, value: &str, visibility: Visibility) -> Field {
+        Field {
+            label: label.into(),
+            value: value.into(),
+            visibility,
+        }
+    }
+}
+
+/// How the vault shows a Field: it follows how the value came in, and only
+/// changes how 1Password shows it, never what optokens gives out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Visibility {
+    /// Hidden like a password: a value piped in (`--field-from-stdin`), or
+    /// typed into a hidden input of the one-time link.
+    Concealed,
+    /// Plain text: a value given on the command line (`--set`), or typed into
+    /// a visible input of the link (`--show`); neither is secret.
+    Plain,
 }
 
 /// A Secret, less its name.
@@ -87,7 +118,7 @@ impl Secret {
     pub fn labels(&self) -> Option<Vec<&str>> {
         match &self.values {
             Values::Single(_) => None,
-            Values::Fields(fields) => Some(fields.iter().map(|(l, _)| l.as_str()).collect()),
+            Values::Fields(fields) => Some(fields.iter().map(|f| f.label.as_str()).collect()),
         }
     }
 }
@@ -154,15 +185,18 @@ impl Name {
 pub struct Put {
     pub kind: Option<Kind>,
     pub description: Option<String>,
-    pub fields: Vec<(String, String)>,
+    pub fields: Vec<Field>,
     /// A bare `put`'s one value, with no label.
     pub value: Option<String>,
 }
 
-/// `--set "NAME=value"`, split on the first `=`.
-pub fn parse_set(set: &str) -> Result<(String, String), Refusal> {
+/// `--set "NAME=value"`, split on the first `=`: a plain Field, since its
+/// value is on the command line.
+pub fn parse_set(set: &str) -> Result<Field, Refusal> {
     match set.split_once('=') {
-        Some((label, value)) if !label.is_empty() => Ok((label.into(), value.into())),
+        Some((label, value)) if !label.is_empty() => {
+            Ok(Field::new(label, value, Visibility::Plain))
+        }
         _ => Err(bad_set(format!(
             "`--set` takes `NAME=value`, and `{}` names no label before an `=`",
             set.split('=').next().unwrap_or_default()
@@ -219,7 +253,7 @@ pub fn is_env_name(label: &str) -> bool {
 }
 
 /// The Secret after `put` upserts into `existing`: the Fields it names are
-/// set, the rest kept, in their order. Every fault found is refused at once.
+/// set, value and visibility, the rest kept as they were, in their order. Every fault found is refused at once.
 pub fn merge(name: &Name, existing: Option<&Secret>, put: &Put) -> Result<Secret, Vec<Refusal>> {
     let mut faults = Vec::new();
     let title = name.title();
@@ -277,12 +311,13 @@ pub fn merge(name: &Name, existing: Option<&Secret>, put: &Put) -> Result<Secret
             format!("name its Fields: `optokens put {}{} --fields NAME,...`", shell_word(name.service()), name.flag()),
         ));
     }
-    for (i, (label, _)) in put.fields.iter().enumerate() {
+    for (i, Field { label, .. }) in put.fields.iter().enumerate() {
+        let before = || put.fields[..i].iter().filter(|f| f.label == *label);
         if label.is_empty() {
             faults.push(bad_set("a Field's label is empty".into()));
-        } else if put.fields[..i].iter().any(|(l, _)| l == label) {
+        } else if before().next().is_some() {
             // Refused once per label, however often it is named.
-            if put.fields[..i].iter().filter(|(l, _)| l == label).count() == 1 {
+            if before().count() == 1 {
                 faults.push(Refusal::of(
                     &Fault::DuplicateLabel,
                     format!("`put {title}` names the Field `{label}` twice"),
@@ -307,10 +342,10 @@ pub fn merge(name: &Name, existing: Option<&Secret>, put: &Put) -> Result<Secret
                 Some(Values::Fields(fields)) => fields.clone(),
                 _ => Vec::new(),
             };
-            for (label, value) in &put.fields {
-                match fields.iter_mut().find(|(l, _)| l == label) {
-                    Some(field) => field.1 = value.clone(),
-                    None => fields.push((label.clone(), value.clone())),
+            for named in &put.fields {
+                match fields.iter_mut().find(|f| f.label == named.label) {
+                    Some(field) => *field = named.clone(),
+                    None => fields.push(named.clone()),
                 }
             }
             Values::Fields(fields)
@@ -339,8 +374,8 @@ pub fn value<'a>(name: &Name, secret: &'a Secret, field: Option<&str>) -> Result
         )),
         (Values::Fields(fields), Some(label)) => fields
             .iter()
-            .find(|(l, _)| l == label)
-            .map(|(_, v)| v.as_str())
+            .find(|f| f.label == label)
+            .map(|f| f.value.as_str())
             .ok_or_else(|| {
                 Refusal::of(
                     &Fault::NoSuchField,
@@ -348,7 +383,7 @@ pub fn value<'a>(name: &Name, secret: &'a Secret, field: Option<&str>) -> Result
                         "`{title}` has no Field `{label}`; its Fields are {}",
                         list_labels(fields)
                     ),
-                    format!("run `{get} --field {}`", shell_word(&fields[0].0)),
+                    format!("run `{get} --field {}`", shell_word(&fields[0].label)),
                 )
             }),
         (Values::Fields(fields), None) => Err(Refusal::of(
@@ -359,16 +394,16 @@ pub fn value<'a>(name: &Name, secret: &'a Secret, field: Option<&str>) -> Result
             ),
             format!(
                 "run `{get} --field {}`, or `{get} --json` for them all",
-                shell_word(&fields[0].0)
+                shell_word(&fields[0].label)
             ),
         )),
     }
 }
 
-fn list_labels(fields: &[(String, String)]) -> String {
+fn list_labels(fields: &[Field]) -> String {
     fields
         .iter()
-        .map(|(l, _)| format!("`{l}`"))
+        .map(|f| format!("`{}`", f.label))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -379,8 +414,12 @@ pub fn to_json(name: &Name, secret: &Secret) -> Value {
     match &secret.values {
         Values::Single(value) => answer["value"] = json!(value),
         Values::Fields(fields) => {
-            answer["fields"] =
-                Value::Object(fields.iter().map(|(l, v)| (l.clone(), json!(v))).collect())
+            answer["fields"] = Value::Object(
+                fields
+                    .iter()
+                    .map(|f| (f.label.clone(), json!(f.value)))
+                    .collect(),
+            )
         }
     }
     answer
@@ -419,7 +458,7 @@ pub fn exports(name: &Name, secret: &Secret) -> Result<String, Refusal> {
     };
     let bad: Vec<&str> = fields
         .iter()
-        .map(|(l, _)| l.as_str())
+        .map(|f| f.label.as_str())
         .filter(|l| !is_env_name(l))
         .collect();
     if !bad.is_empty() {
@@ -437,7 +476,7 @@ pub fn exports(name: &Name, secret: &Secret) -> Result<String, Refusal> {
     }
     Ok(fields
         .iter()
-        .map(|(l, v)| format!("export {l}={}\n", single_quoted(v)))
+        .map(|f| format!("export {}={}\n", f.label, single_quoted(&f.value)))
         .collect())
 }
 
@@ -466,23 +505,23 @@ mod tests {
         Name::new("glm", "default").unwrap()
     }
 
+    /// Concealed Fields.
+    fn concealed(pairs: &[(&str, &str)]) -> Vec<Field> {
+        pairs
+            .iter()
+            .map(|(l, v)| Field::new(l, v, Visibility::Concealed))
+            .collect()
+    }
+
     fn fields(pairs: &[(&str, &str)]) -> Values {
-        Values::Fields(
-            pairs
-                .iter()
-                .map(|(l, v)| (l.to_string(), v.to_string()))
-                .collect(),
-        )
+        Values::Fields(concealed(pairs))
     }
 
     fn put(kind: Option<Kind>, pairs: &[(&str, &str)]) -> Put {
         Put {
             kind,
             description: None,
-            fields: pairs
-                .iter()
-                .map(|(l, v)| (l.to_string(), v.to_string()))
-                .collect(),
+            fields: concealed(pairs),
             value: None,
         }
     }
@@ -669,9 +708,12 @@ mod tests {
     fn a_set_splits_on_the_first_equals_sign() {
         assert_eq!(
             parse_set("URL=https://x?a=b").unwrap(),
-            ("URL".into(), "https://x?a=b".into())
+            Field::new("URL", "https://x?a=b", Visibility::Plain)
         );
-        assert_eq!(parse_set("EMPTY=").unwrap(), ("EMPTY".into(), "".into()));
+        assert_eq!(
+            parse_set("EMPTY=").unwrap(),
+            Field::new("EMPTY", "", Visibility::Plain)
+        );
         let refused = parse_set("NOEQUALS").unwrap_err();
         assert_eq!(refused.kind, Some("bad_set"));
         assert_eq!(refused.fix, "write each as `--set \"NAME=value\"`");
@@ -811,23 +853,26 @@ mod tests {
 
         #[test]
         fn a_merge_holds_every_field_put_named_and_every_one_it_kept(
-            stored in proptest::collection::vec(("[A-Z]{1,3}", ".{0,5}"), 0..5),
-            named in proptest::collection::vec(("[A-Z]{1,3}", ".{0,5}"), 1..5),
+            stored in proptest::collection::vec(("[A-Z]{1,3}", ".{0,5}", any::<bool>()), 0..5),
+            named in proptest::collection::vec(("[A-Z]{1,3}", ".{0,5}", any::<bool>()), 1..5),
         ) {
-            let dedup = |v: Vec<(String, String)>| {
-                let mut out: Vec<(String, String)> = Vec::new();
-                for (l, val) in v { if !out.iter().any(|(o, _)| *o == l) { out.push((l, val)); } }
+            let dedup = |v: Vec<(String, String, bool)>| {
+                let mut out: Vec<Field> = Vec::new();
+                for (l, val, plain) in v {
+                    let visibility = if plain { Visibility::Plain } else { Visibility::Concealed };
+                    if !out.iter().any(|o| o.label == l) { out.push(Field::new(&l, &val, visibility)); }
+                }
                 out
             };
             let (stored, named) = (dedup(stored), dedup(named));
             let existing = (!stored.is_empty()).then(|| Secret { kind: Kind::Static, description: None, values: Values::Fields(stored.clone()) });
             let merged = merge(&name(), existing.as_ref(), &Put { fields: named.clone(), ..Put::default() }).unwrap();
             let Values::Fields(merged) = merged.values else { panic!("fields") };
-            for (l, v) in &named { prop_assert!(merged.contains(&(l.clone(), v.clone()))); }
-            for (l, v) in &stored {
-                if !named.iter().any(|(n, _)| n == l) { prop_assert!(merged.contains(&(l.clone(), v.clone()))); }
+            for f in &named { prop_assert!(merged.contains(f)); }
+            for f in &stored {
+                if !named.iter().any(|n| n.label == f.label) { prop_assert!(merged.contains(f)); }
             }
-            prop_assert_eq!(merged.len(), stored.len() + named.iter().filter(|(n, _)| !stored.iter().any(|(s, _)| s == n)).count());
+            prop_assert_eq!(merged.len(), stored.len() + named.iter().filter(|n| !stored.iter().any(|s| s.label == n.label)).count());
         }
     }
 }

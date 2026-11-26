@@ -6,7 +6,7 @@ use crate::cli::Answer;
 use crate::item;
 use crate::link::{self, Input, Link, Token};
 use crate::refusal::Refusal;
-use crate::secret::{self, Kind, Name, Put};
+use crate::secret::{self, Field, Kind, Name, Put, Visibility};
 use crate::serve::Endpoint;
 use crate::store::Store;
 use serde_json::{Value, json};
@@ -27,10 +27,10 @@ pub struct PutArgs {
     /// What the Secret is for, for a later agent that reads `list`.
     #[arg(long, verbatim_doc_comment)]
     description: Option<String>,
-    /// `NAME=value`: a Field that is not secret; repeat it for several.
+    /// `NAME=value`: a Field that is not secret, stored as plain text; repeat it for several.
     #[arg(long, value_name = "NAME=value", verbatim_doc_comment)]
     set: Vec<String>,
-    /// The label of the one Field whose value is all of stdin, piped in by a command.
+    /// The label of the one Field whose value is all of stdin, piped in by a command: stored concealed, for a secret.
     #[arg(long, value_name = "Label", verbatim_doc_comment)]
     field_from_stdin: Option<String>,
     /// The labels of the Fields a person enters on the one-time link, comma-separated.
@@ -95,7 +95,7 @@ fn put_secret(
     }
     if let Some(label) = &args.field_from_stdin {
         match secret::stdin_value(terminal, read) {
-            Ok(value) => fields.push((label.clone(), value)),
+            Ok(value) => fields.push(Field::new(label, &value, Visibility::Concealed)),
             Err(refusal) => faults.push(refusal),
         }
     }
@@ -126,13 +126,19 @@ fn put_secret(
         fields,
         value: single.then(String::new),
     };
-    put.fields
-        .extend(asked.iter().map(|l| (l.clone(), String::new())));
+    // A Field typed into a visible input is no secret; any other is.
+    put.fields.extend(asked.iter().map(|l| {
+        let visibility = match shown.contains(l) {
+            true => Visibility::Plain,
+            false => Visibility::Concealed,
+        };
+        Field::new(l, "", visibility)
+    }));
     // Every fault is refused before the link is served: its values fill
     // the placeholders of what is merged.
     let mut merged = secret::merge(&name, existing, &put)?;
     if let Some(endpoint) = endpoint {
-        let link = link_for(&name, existing, &put, &asked, &shown);
+        let link = link_for(&name, existing, &put, &asked);
         let what = format!("the secret for {} / {}", name.service(), name.account());
         let mut values = endpoint.serve(link, &what, "put").map_err(|r| vec![r])?;
         match &mut merged.values {
@@ -140,9 +146,9 @@ fn put_secret(
                 *value = values.pop_first().map(|(_, v)| v).unwrap_or_default()
             }
             secret::Values::Fields(fields) => {
-                for (label, value) in fields.iter_mut() {
-                    if let Some(entered) = values.remove(label) {
-                        *value = entered;
+                for field in fields.iter_mut() {
+                    if let Some(entered) = values.remove(&field.label) {
+                        field.value = entered;
                     }
                 }
             }
@@ -162,21 +168,16 @@ fn put_secret(
     }))
 }
 
-/// The link that asks for the `asked` Fields (`shown` as typed), or the bare
-/// `put`'s one value, and shows each stored Field this `put` keeps as already set.
-fn link_for(
-    name: &Name,
-    existing: Option<&secret::Secret>,
-    put: &Put,
-    asked: &[String],
-    shown: &[String],
-) -> Link {
+/// The link that asks for the `asked` Fields (a plain one's input showing
+/// what is typed), or the bare `put`'s one value, and shows each stored Field
+/// this `put` keeps as already set.
+fn link_for(name: &Name, existing: Option<&secret::Secret>, put: &Put, asked: &[String]) -> Link {
     let kept = match existing.map(|e| &e.values) {
         Some(secret::Values::Fields(stored)) => stored
             .iter()
-            .filter(|(l, _)| !put.fields.iter().any(|(p, _)| p == l))
-            .map(|(l, _)| link::Field {
-                label: l.clone(),
+            .filter(|f| !put.fields.iter().any(|p| p.label == f.label))
+            .map(|f| link::Field {
+                label: f.label.clone(),
                 input: Input::AlreadySet,
             })
             .collect(),
@@ -188,14 +189,14 @@ fn link_for(
             input: Input::Password,
         }]
     } else {
-        asked
+        put.fields
             .iter()
-            .map(|l| link::Field {
-                label: l.clone(),
-                input: if shown.contains(l) {
-                    Input::Text
-                } else {
-                    Input::Password
+            .filter(|f| asked.contains(&f.label))
+            .map(|f| link::Field {
+                label: f.label.clone(),
+                input: match f.visibility {
+                    Visibility::Plain => Input::Text,
+                    Visibility::Concealed => Input::Password,
                 },
             })
             .chain(kept)

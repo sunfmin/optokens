@@ -166,7 +166,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads the Secret from the vault, merges into it what this `put` names, and writes it back as one item, only when that changes it. A Field not named is kept. `--set "NAME=value"` sets a Field that is not secret, split on the first `=`; repeat it. `--field-from-stdin <Label>` sets one Field to all of stdin, one trailing newline dropped: for a value a command makes and pipes in, such as `openssl rand -base64 32 | optokens put deploy-db --set "Username=svc" --field-from-stdin Password`. `--description` replaces the description; alone, for a stored Secret, it changes nothing else. A new Secret is `static` unless `--kind profile`. A Profile's labels are environment variables' names, for `env`. How a Secret is laid out in the vault: [Secrets in the vault](help:secrets).
+    /// It reads the Secret from the vault, merges into it what this `put` names, and writes it back as one item, only when that changes it. A Field not named is kept. `--set "NAME=value"` sets a Field that is not secret, split on the first `=`, stored as plain text; repeat it. `--field-from-stdin <Label>` sets one Field to all of stdin, one trailing newline dropped, stored concealed: for a secret a command makes and pipes in, such as `openssl rand -base64 32 | optokens put deploy-db --set "Username=svc" --field-from-stdin Password`. `--description` replaces the description; alone, for a stored Secret, it changes nothing else. A new Secret is `static` unless `--kind profile`. A Profile's labels are environment variables' names, for `env`. How a Secret is laid out in the vault: [Secrets in the vault](help:secrets).
     ///
     /// ## The one-time link
     ///
@@ -361,6 +361,15 @@ struct AccountTopic;
 ///
 /// A Secret is one item of the vault, of the category `{const:CATEGORY}`, titled `<service>/<account>` and tagged `{const:TAG}`. Its values are the fields of the section `{const:VALUES}`, each labelled with its Field's label (a single value is one field, `{const:SINGLE}`). Its kind, its description and whether it is a single value are the fields of the section `{const:META}`, so a Field may be called `kind` or `description` without a clash.
 ///
+/// ## Which Fields are concealed
+///
+/// A Field's type in the vault follows how its value came in, and `put` sets it each time it sets the Field; a Field it does not name keeps its type:
+///
+/// - `{const:STRING}`, plain text: `--set "NAME=value"`, and a `--show` Field typed visibly on the link. A value on the command line is not secret.
+/// - `{const:CONCEALED}`, shown like a password: `--field-from-stdin <Label>`, a `--fields` Field not in `--show`, and a bare `put`'s single value. Store a secret this way.
+///
+/// The type changes only how 1Password shows the field: `get`, `env` and `list` give out the same either way. An item with another type in the section `{const:VALUES}` is refused (`not_optokens`).
+///
 /// optokens reads only items tagged `{const:TAG}`. An item of a Secret's title without the tag, or one whose section `{const:META}` is not this layout, is refused by name (`not_optokens`), never guessed at. Edit a Secret with optokens, not in 1Password.
 ///
 /// ## The faults
@@ -389,6 +398,8 @@ pub(crate) fn help() -> Help {
         .constant("VALUES", item::VALUES)
         .constant("META", item::META)
         .constant("SINGLE", item::SINGLE)
+        .constant("STRING", item::STRING)
+        .constant("CONCEALED", item::CONCEALED)
         .constant("LINK_MINUTES", crate::link::LIFETIME.as_secs() / 60)
         .constant("EXIT_OK", EXIT_OK)
         .constant("EXIT_ERROR", EXIT_ERROR)

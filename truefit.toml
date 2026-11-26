@@ -85,6 +85,27 @@ says = "Metadata in a section of its own: chosen, because a user's Field may be 
 source = "docs/adr/0009-one-item-per-secret-metadata-in-its-own-section.md:13"
 check = ["test"]
 
+# A Field's type in the vault (ADR 0011), kept by the tests of src/item.rs,
+# src/secret.rs and tests/secrets.rs, tests/link.rs.
+
+[[promise]]
+name = "field-type-follows-how-it-came-in"
+says = "Each field of the section `fields` has the type of the way its value came in: `STRING` for `--set` and a `--show` Field, `CONCEALED` for `--field-from-stdin`, a hidden link input and a bare `put`'s single value."
+source = "docs/adr/0011-a-fields-type-follows-how-its-value-came-in.md:5"
+check = ["test"]
+
+[[promise]]
+name = "field-type-read-and-merged"
+says = "`read` takes each Field's type from its field, refusing any type but `STRING` and `CONCEALED`; `put` gives a Field it sets the type of the way it came in and keeps an unnamed Field's type, and writes nothing when neither value nor type changes."
+source = "docs/adr/0011-a-fields-type-follows-how-its-value-came-in.md:14"
+check = ["test"]
+
+[[promise]]
+name = "field-type-changes-nothing-given-out"
+says = "The type changes only how 1Password shows a field: `get`, `env` and `list` give out the same as before. Items written when every value was `CONCEALED` read back as they are; nothing migrates them."
+source = "docs/adr/0011-a-fields-type-follows-how-its-value-came-in.md:16"
+check = ["test"]
+
 # The one-time link's rules (ADR 0008), each kept by the tests of src/link/tests.rs.
 
 [[promise]]

@@ -76,6 +76,27 @@ impl Host {
         std::fs::write(self.state_file(), state.to_string()).unwrap();
     }
 
+    /// Each value's field type in the vault's item `title`, by its label:
+    /// `{ "Label": "CONCEALED" }`.
+    #[allow(dead_code)] // not every test binary looks at types
+    pub fn field_types(&self, title: &str) -> Value {
+        let items = self.state()["op"]["items"].clone();
+        let item = items
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["title"] == title)
+            .unwrap_or_else(|| panic!("no item {title}: {items}"))
+            .clone();
+        item["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|f| f["section"]["label"] == "fields")
+            .map(|f| (f["label"].as_str().unwrap().to_string(), f["type"].clone()))
+            .collect()
+    }
+
     pub fn calls(&self) -> Value {
         self.state()["calls"].clone()
     }

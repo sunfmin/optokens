@@ -98,6 +98,12 @@ fn put_list_get_env_rm_a_profile() {
         ]
     );
 
+    assert_eq!(
+        host.field_types("glm/default"),
+        json!({ "ANTHROPIC_BASE_URL": "STRING", "ANTHROPIC_AUTH_TOKEN": "CONCEALED" }),
+        "--set is plain, stdin concealed"
+    );
+
     // The same put again writes nothing.
     let again = piped(
         &host,
@@ -193,6 +199,63 @@ fn put_list_get_env_rm_a_profile() {
             .iter()
             .all(|c| c["token_in_env"] == true),
         "{calls}"
+    );
+}
+
+/// A Field's type follows the way this put set it, both ways; one it does not
+/// name keeps its own, and a stored item reads back as it was.
+#[test]
+fn a_fields_type_follows_how_its_value_came_in() {
+    let concealed = |label: &str, value: &str| {
+        let mut f = field("fields", label, value);
+        f["type"] = json!("CONCEALED");
+        f
+    };
+    let host = seeded(json!([stored(
+        "id1",
+        "app/default",
+        json!(["optokens"]),
+        json!([
+            concealed("URL", "https://a"),
+            concealed("TOKEN", "t"),
+            field("fields", "USER", "u"),
+            field("optokens", "kind", "static"),
+            field("optokens", "shape", "fields")
+        ])
+    )]));
+    let types = || host.field_types("app/default");
+    assert_eq!(
+        run(&host, &["get", "app", "--json"]).json()["fields"],
+        json!({ "URL": "https://a", "TOKEN": "t", "USER": "u" })
+    );
+    assert_eq!(
+        run(&host, &["put", "app", "--set", "URL=https://a"]).json()["changed"],
+        true,
+        "--set of the same value turns a concealed Field plain"
+    );
+    assert_eq!(
+        types(),
+        json!({ "URL": "STRING", "TOKEN": "CONCEALED", "USER": "STRING" })
+    );
+    assert_eq!(
+        run(&host, &["put", "app", "--set", "URL=https://a"]).json()["changed"],
+        false,
+        "nor type nor value changes: nothing is written"
+    );
+    let piped_in = piped(
+        &host,
+        &["put", "app", "--field-from-stdin", "URL"],
+        "https://b",
+    );
+    assert_eq!(piped_in.json()["changed"], true);
+    assert_eq!(
+        types(),
+        json!({ "URL": "CONCEALED", "TOKEN": "CONCEALED", "USER": "STRING" })
+    );
+    assert_eq!(
+        run(&host, &["get", "app", "--json"]).json()["fields"],
+        json!({ "URL": "https://b", "TOKEN": "t", "USER": "u" }),
+        "a type changes nothing optokens gives out"
     );
 }
 
