@@ -147,8 +147,7 @@ fn check_tailscale(world: &World, findings: &mut Vec<Refusal>) -> (Value, Value)
     };
     let address = run(&path, tailscale::IP).and_then(|ran| {
         tailscale::addresses(&ran.stdout)
-            .first()
-            .copied()
+            .next()
             .ok_or("it printed no address".into())
     });
     let address = address

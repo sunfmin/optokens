@@ -15,15 +15,13 @@ pub fn listen_address(
     let Some(answer) = tailscale_ip else {
         return Err(nothing_stored(tailscale_missing()));
     };
-    let tailnet = tailscale::addresses(answer);
-    let Some(first) = tailnet.first() else {
+    let mut tailnet = tailscale::addresses(answer).peekable();
+    let Some(&first) = tailnet.peek() else {
         return Err(nothing_stored(no_tailnet_address("it printed no address")));
     };
     tailnet
-        .iter()
         .filter(|a| interfaces.contains(a))
-        .min_by_key(|a| a.is_ipv6())
-        .copied()
+        .min_by_key(IpAddr::is_ipv6)
         .ok_or_else(|| {
             nothing_stored(Refusal::new(
                 format!("the tailnet address {first} is on no interface of this host"),

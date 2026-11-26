@@ -54,7 +54,7 @@ pub fn sent(link: &Link) -> String {
 }
 
 fn page(link: &Link, body: &str) -> String {
-    let secret = escape(&format!("{}/{}", link.service, link.account));
+    let secret = escape(&link.secret);
     format!(
         "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<meta name=\"robots\" content=\"noindex\">\n<title>optokens: {secret}</title>\n<style>\nbody {{ font: 16px system-ui, sans-serif; margin: 0 auto; max-width: 28rem; padding: 1.5rem 1rem; }}\nlabel {{ display: block; margin: 1rem 0 .25rem; font-weight: 600; }}\ninput, button {{ box-sizing: border-box; width: 100%; font-size: 1rem; padding: .6rem; }}\nbutton {{ margin-top: 1.25rem; }}\n.problem {{ color: #d70015; }}\n.note {{ color: #86868b; font-size: .875rem; }}\n</style></head><body>\n<h1>{secret}</h1>\n{body}\n</body></html>\n"
     )

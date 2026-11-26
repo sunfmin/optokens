@@ -18,11 +18,8 @@ pub const HTTPS_FIX: &str =
     "turn on MagicDNS and HTTPS Certificates in the DNS settings of the Tailscale admin console";
 
 /// The addresses `tailscale ip` printed, in its order.
-pub fn addresses(stdout: &str) -> Vec<IpAddr> {
-    stdout
-        .lines()
-        .filter_map(|l| l.trim().parse().ok())
-        .collect()
+pub fn addresses(stdout: &str) -> impl Iterator<Item = IpAddr> + '_ {
+    stdout.lines().filter_map(|l| l.trim().parse().ok())
 }
 
 /// The names `tailscale cert` can get a certificate for, from `status --json`.
@@ -49,8 +46,19 @@ mod tests {
             "100.73.216.32".parse().unwrap(),
             "fd7a:115c::1".parse().unwrap(),
         ];
-        assert_eq!(addresses("100.73.216.32\n fd7a:115c::1 \n"), both);
-        assert_eq!(addresses("\nnot an address\n"), Vec::<IpAddr>::new());
+        assert_eq!(
+            addresses("100.73.216.32\n fd7a:115c::1 \n").collect::<Vec<_>>(),
+            both
+        );
+        assert_eq!(
+            addresses(
+                "
+not an address
+"
+            )
+            .next(),
+            None
+        );
         assert_eq!(
             cert_domains(r#"{"CertDomains": ["a.tail.ts.net"]}"#).unwrap(),
             ["a.tail.ts.net"]

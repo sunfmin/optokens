@@ -85,8 +85,8 @@ pub type Values = BTreeMap<String, String>;
 /// One Secret's one-time link.
 #[derive(Debug)]
 pub struct Link {
-    service: String,
-    account: String,
+    /// `<service>/<account>`.
+    secret: String,
     description: Option<String>,
     fields: Vec<Field>,
     token: Token,
@@ -105,8 +105,7 @@ impl Link {
         made: SystemTime,
     ) -> Link {
         Link {
-            service: service.into(),
-            account: account.into(),
+            secret: format!("{service}/{account}"),
             description: description.map(String::from),
             fields,
             token,
