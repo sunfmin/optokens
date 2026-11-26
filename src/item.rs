@@ -8,7 +8,8 @@
 //! that is not this shape is refused by name, never guessed at.
 
 use crate::refusal::Refusal;
-use crate::secret::{Fault, Field, Kind, Name, Secret, Values, Visibility};
+use crate::secret::Visibility::{self, Concealed, Plain};
+use crate::secret::{Fault, Field, Kind, Name, Secret, Values};
 use serde_json::{Map, Value, json};
 
 /// The tag on every item optokens writes.
@@ -34,8 +35,8 @@ pub const STRING: &str = "STRING";
 
 fn field_type(visibility: Visibility) -> &'static str {
     match visibility {
-        Visibility::Concealed => CONCEALED,
-        Visibility::Plain => STRING,
+        Concealed => CONCEALED,
+        Plain => STRING,
     }
 }
 
@@ -43,28 +44,19 @@ fn field_type(visibility: Visibility) -> &'static str {
 pub fn template(name: &Name, secret: &Secret) -> Value {
     let field = |section: &str, id: String, kind: &str, label: &str, value: &str| json!({ "id": id, "section": { "id": section }, "type": kind, "label": label, "value": value });
     let (shape, values) = match &secret.values {
-        Values::Single(value) => (
-            SHAPE_SINGLE,
-            vec![(SINGLE, value.as_str(), Visibility::Concealed)],
-        ),
-        Values::Fields(fields) => (
-            SHAPE_FIELDS,
-            fields
-                .iter()
-                .map(|f| (f.label.as_str(), f.value.as_str(), f.visibility))
-                .collect(),
-        ),
+        Values::Single(value) => (SHAPE_SINGLE, vec![Field::new(SINGLE, value, Concealed)]),
+        Values::Fields(fields) => (SHAPE_FIELDS, fields.clone()),
     };
     let mut fields: Vec<Value> = values
         .iter()
         .enumerate()
-        .map(|(i, (l, v, visibility))| {
+        .map(|(i, f)| {
             field(
                 VALUES,
                 format!("{VALUES}.{i}"),
-                field_type(*visibility),
-                l,
-                v,
+                field_type(f.visibility),
+                &f.label,
+                &f.value,
             )
         })
         .collect();
@@ -129,20 +121,15 @@ fn layout(item: &Value) -> Result<(Name, Secret), String> {
         match section {
             VALUES => {
                 let visibility = match field["type"].as_str() {
-                    Some(CONCEALED) => Visibility::Concealed,
-                    Some(STRING) => Visibility::Plain,
+                    Some(CONCEALED) => Concealed,
+                    Some(STRING) => Plain,
                     other => {
                         return Err(format!(
-                            "its field `{label}` in section `{VALUES}` is of type {}, neither `{CONCEALED}` nor `{STRING}`",
-                            other.map_or("none".into(), |t| format!("`{t}`"))
+                            "its field `{label}` in section `{VALUES}` is of type {other:?}, neither `{CONCEALED}` nor `{STRING}`"
                         ));
                     }
                 };
-                values.push(Field {
-                    label,
-                    value,
-                    visibility,
-                })
+                values.push(Field::new(&label, &value, visibility))
             }
             META => meta.push((label, value)),
             other => return Err(format!("it has a section `{other}`")),
@@ -277,8 +264,8 @@ mod tests {
                 kind: Kind::Static,
                 description: Some("CI deploy".into()),
                 values: Values::Fields(vec![
-                    Field::new("Access Key ID", "AKIA", Visibility::Plain),
-                    Field::new("Secret", "s", Visibility::Concealed),
+                    Field::new("Access Key ID", "AKIA", Plain),
+                    Field::new("Secret", "s", Concealed),
                 ]),
             },
         )
@@ -312,8 +299,8 @@ mod tests {
             kind: Kind::Profile,
             description: None,
             values: Values::Fields(vec![
-                Field::new("kind", "x", Visibility::Plain),
-                Field::new("description", "y", Visibility::Concealed),
+                Field::new("kind", "x", Plain),
+                Field::new("description", "y", Concealed),
             ]),
         };
         assert_eq!(
@@ -370,10 +357,17 @@ mod tests {
                 .ends_with("its section `optokens` has a field `level`")
         );
         assert!(
+            why(&|i| i["fields"][1]["section"] = json!({ "id": "x", "label": "other" }))
+                .ends_with("it has a section `other`")
+        );
+        assert!(why(&|i| i["fields"][2]["type"] = json!("URL")).ends_with(
+            "its field `Secret` in section `fields` is of type Some(\"URL\"), neither `CONCEALED` nor `STRING`"
+        ));
+        assert!(
             why(&|i| {
                 i["fields"][1].as_object_mut().unwrap().remove("type");
             })
-            .ends_with("is of type none, neither `CONCEALED` nor `STRING`")
+            .ends_with("is of type None, neither `CONCEALED` nor `STRING`")
         );
         assert!(
             why(&|i| i["fields"][2]["label"] = json!("Access Key ID"))
@@ -426,24 +420,17 @@ mod tests {
             proptest::option::of(".{0,12}"),
             prop_oneof![
                 ".{0,12}".prop_map(Values::Single),
-                proptest::collection::btree_map(label, (".{0,12}", any::<bool>()), 1..5).prop_map(
-                    |m| Values::Fields(
-                        m.into_iter()
-                            .rev()
-                            .map(|(l, (v, plain))| {
-                                Field::new(
-                                    &l,
-                                    &v,
-                                    if plain {
-                                        Visibility::Plain
-                                    } else {
-                                        Visibility::Concealed
-                                    },
-                                )
-                            })
-                            .collect()
-                    )
-                ),
+                proptest::collection::btree_map(
+                    label,
+                    (".{0,12}", prop_oneof![Just(Plain), Just(Concealed)]),
+                    1..5
+                )
+                .prop_map(|m| Values::Fields(
+                    m.into_iter()
+                        .rev()
+                        .map(|(l, (v, vis))| Field::new(&l, &v, vis))
+                        .collect()
+                )),
             ],
         )
             .prop_map(|(service, account, kind, description, values)| {

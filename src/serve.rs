@@ -8,7 +8,7 @@ use crate::doctor::{no_tailnet_address, tailscale_missing};
 use crate::link::{self, Link, Request, Response, Scheme, Values};
 use crate::program;
 use crate::refusal::Refusal;
-use crate::secret::{Fault, Name};
+use crate::secret::Fault;
 use crate::tailscale;
 use rustls::ServerConfig;
 use rustls::pki_types::pem::PemObject;
@@ -54,11 +54,12 @@ impl Endpoint {
         })
     }
 
-    /// Serves `link` for `name` until its one submission, which it answers,
-    /// or its expiry, refused as `link_expired`. It prints the link on stderr
-    /// first, with why it is plain HTTP when it is. Later requests are
+    /// Serves `link` until its one submission, which it answers, or its
+    /// expiry, refused as `link_expired` with the fix of running `command`
+    /// again. It prints the link on stderr first, saying it is to enter
+    /// `what`, with why it is plain HTTP when it is. Later requests are
     /// answered "already used" until optokens exits.
-    pub fn serve(self, name: &Name, link: Link) -> Result<Values, Refusal> {
+    pub fn serve(self, link: Link, what: &str, command: &str) -> Result<Values, Refusal> {
         let address = self.listener.local_addr().map_err(io_refusal)?;
         let port = address.port();
         let (url, tls) = match link::scheme(certificate(&self.tailscale), &user()) {
@@ -72,12 +73,11 @@ impl Endpoint {
             }
         };
         eprintln!(
-            "optokens: open this link to enter the secret for {} / {} (it works once, within {} minutes):\n{url}",
-            name.service(),
-            name.account(),
+            "optokens: open this link to enter {what} (it works once, within {} minutes):\n{url}",
             link::LIFETIME.as_secs() / 60
         );
         let expires = link.expires();
+        let title = link.title().to_string();
         let (sent, values) = mpsc::channel();
         let link = Arc::new(Mutex::new(link));
         let listener = self.listener;
@@ -102,10 +102,9 @@ impl Endpoint {
                 Refusal::of(
                     &Fault::LinkExpired,
                     format!(
-                        "no value was submitted on the one-time link for `{}` before it expired, so nothing was stored",
-                        name.title()
+                        "no value was submitted on the one-time link for `{title}` before it expired, so nothing was stored"
                     ),
-                    "run the same `optokens put` again, and open its new link sooner",
+                    format!("run the same `optokens {command}` again, and open its new link sooner"),
                 )
             })
     }
@@ -324,6 +323,18 @@ mod tests {
     }
 
     #[test]
+    fn a_head_buffered_exactly_at_its_limit_is_still_read_on() {
+        // Reads of 4096 bytes land on the limit; the next one ends the head.
+        let mut head = b"GET /x HTTP/1.1\r\nX-Pad: ".to_vec();
+        head.resize(HEAD_MAX, b'p');
+        let mut reads: Vec<Vec<u8>> = head.chunks(4096).map(<[u8]>::to_vec).collect();
+        reads.push(b"\r\n\r\n".to_vec());
+        let (method, target, body) = read_request(&mut Conn::new(reads)).unwrap();
+        assert_eq!((method.as_str(), target.as_str()), ("GET", "/x"));
+        assert!(body.is_empty());
+    }
+
+    #[test]
     fn a_body_up_to_its_limit_is_read_whole_across_reads_and_one_past_is_refused() {
         let body = vec![b'v'; BODY_MAX];
         let (method, target, read) = read_request(&mut Conn::new(post(BODY_MAX, &body))).unwrap();
@@ -336,10 +347,17 @@ mod tests {
     }
 
     #[test]
+    fn a_body_of_64_kib_is_read() {
+        // The limit written out, not derived from BODY_MAX, so a smaller limit fails here.
+        let body = vec![b'v'; 64 * 1024];
+        let (_, _, read) = read_request(&mut Conn::new(post(body.len(), &body))).unwrap();
+        assert_eq!(read.len(), 64 * 1024);
+    }
+
+    #[test]
     fn each_answer_has_its_status_line_and_closes() {
         let link = Mutex::new(Link::new(
-            "svc",
-            "default",
+            "svc/default",
             None,
             Vec::new(),
             link::Token::fresh(),

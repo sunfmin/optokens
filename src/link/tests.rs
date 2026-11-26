@@ -18,8 +18,7 @@ fn field(label: &str, input: Input) -> Field {
 
 fn link_of(fields: Vec<Field>, description: Option<&str>) -> Link {
     Link::new(
-        "svc",
-        "default",
+        "svc/default",
         description,
         fields,
         Token::fresh(),
@@ -231,8 +230,7 @@ fn every_piece_of_text_is_escaped() {
         "&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;"
     );
     let mut link = Link::new(
-        "<s>",
-        "a&b",
+        "<s>/a&b",
         None,
         vec![field("\"", Input::Password)],
         Token::fresh(),

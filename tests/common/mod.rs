@@ -2,6 +2,8 @@
 //! stand-ins (`examples/standin.rs`) placed first on `PATH`, and their state.
 #![allow(dead_code)] // each test file uses part of it
 
+pub mod link;
+
 use serde_json::Value;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;

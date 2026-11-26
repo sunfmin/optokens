@@ -1,0 +1,10 @@
+{
+  "tree": "432c4e081035de7c4bb4e31546f038f420b639f6+d1fba762150c532c",
+  "lines": 279,
+  "serves": "optokens#6",
+  "considered": "account::token/vault (reused through one account::find for Store::open and init --check), Store and its op runner (reused for every check), the link and its server (generalised from a Secret's name to a title, not copied), access.rs's Windows DACL reader (shares GetSecurityInfo with the new restrict)",
+  "reviewer": "codex:01a218be-138d-7a62-a4b7-ce0207ea536c:default",
+  "author": "claude-code:eab9c18d-e927-58ee-802a-3dfeef830d7d:opus",
+  "cut": "In src/init.rs, have both modes produce the token and vault, then build the Store, run the checks, and render the answer once, adding the saved-file note only after a write. In src/store.rs and src/init.rs, replace vaults() with a presence check over the JSON response and remove the intermediate Vec<String>. In src/access.rs, share the GetSecurityInfo call, status handling, and Descriptor ownership between the Windows access check and restrict. In tests/init.rs, return Ran directly from the submission helper and assert the link announcement against Ran.stderr.",
+  "answer": "Made all four: init and --check share one path (enter() for the link, then save, store, checks and the answer once, the kept-file note only after a write); Store::has_vault checks the JSON in place; access.rs has one security() helper for entries and restrict; the test helper returns Ran and asserts the link line on its stderr"
+}
