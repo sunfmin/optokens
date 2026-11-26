@@ -1,0 +1,16 @@
+{
+  "tree": "b0862dac630b512cfc1125d5a065c3ebd7603ebb+864fed9addee9b02",
+  "picker": "codex:01a21a21-f75f-7573-a61c-4aab7fb00368:default",
+  "author": "claude-code:84dc9add-b423-5103-a130-f9b62d3991f6:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/item.rs:128:5: replace section_labels -> Map<String, Value> with Default::default()",
+        "why": "The new test’s ID-only field is foreign, so an empty lookup can still preserve it while breaking reads and edits of ID-only fields that optokens owns.",
+        "outcome": "killed",
+        "first_outcome": "survived"
+      }
+    ]
+  },
+  "added_lines": 64
+}
