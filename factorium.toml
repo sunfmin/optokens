@@ -6,6 +6,12 @@ slow = "./gate.sh"
 slow_limit = 300
 regenerated = [".slimfit/baseline.json", ".docfit/baseline.json"]
 
+[cut]
+steps = ["packaging/release.sh cut $FACTORIUM_VERSION"]
+formula = "sunfmin/tap/optokens"
+# Five platforms built on this host, then published to the tap and the bucket.
+limit = 1800
+
 [idle]
 tasks = "slimfit --version && truefit --version && docfit --version && slimfit next --all --sample 5 && truefit next --all && docfit next --all"
 every = 86400
