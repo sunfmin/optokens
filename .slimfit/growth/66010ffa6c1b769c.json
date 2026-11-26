@@ -1,0 +1,10 @@
+{
+  "tree": "4eece5664aaacc155580212aa470c8a010c53014+d1fba762150c532c",
+  "lines": 256,
+  "serves": "optokens#3",
+  "considered": "doctor's tailscale refusals and address parsing (now shared with the link rule instead of copied); mytokens' HTTP request parser and response headers (left to the serving issue, not ported here)",
+  "reviewer": "codex:01a21736-3d40-76e2-9513-9fa5b752e1b7:default",
+  "author": "claude-code:75a7ebe0-ee23-5f8e-b1e6-018642b30610:opus",
+  "cut": "In src/tailscale.rs, return an iterator of parsed addresses and collect only in the parser test. In src/doctor.rs, take the first address with next(). In src/link/endpoint.rs, peek at the first address for the refusal, then select the matching address from the same iterator. In src/link.rs and src/link/page.rs, store the combined service/account name once and escape it when rendering.",
+  "answer": "made all four cuts as named (commit 4eece56); the rest is the rules the issue asks for and their tests"
+}

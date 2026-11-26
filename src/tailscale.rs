@@ -1,6 +1,8 @@
 //! The Tailscale CLI, `tailscale`: the one module that builds its command
 //! lines and reads its answers. The tests' stand-in shares these constants.
 
+use std::net::IpAddr;
+
 /// The program's name on `PATH`.
 pub const PROGRAM: &str = "tailscale";
 /// What prints this host's tailnet addresses, one a line.
@@ -11,13 +13,13 @@ pub const STATUS: &[&str] = &["status", "--json"];
 /// certificate for: empty unless the tailnet has HTTPS certificates on.
 pub const CERT_DOMAINS: &str = "CertDomains";
 
-/// The first address `tailscale ip` printed.
-pub fn address(stdout: &str) -> Option<String> {
-    stdout
-        .lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())
-        .map(String::from)
+/// What turns on certificates for `tailscale cert`, said wherever one is missing.
+pub const HTTPS_FIX: &str =
+    "turn on MagicDNS and HTTPS Certificates in the DNS settings of the Tailscale admin console";
+
+/// The addresses `tailscale ip` printed, in its order.
+pub fn addresses(stdout: &str) -> impl Iterator<Item = IpAddr> + '_ {
+    stdout.lines().filter_map(|l| l.trim().parse().ok())
 }
 
 /// The names `tailscale cert` can get a certificate for, from `status --json`.
@@ -39,12 +41,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_first_address_and_the_cert_domains_are_read_from_its_answers() {
+    fn the_addresses_and_the_cert_domains_are_read_from_its_answers() {
+        let both: Vec<IpAddr> = vec![
+            "100.73.216.32".parse().unwrap(),
+            "fd7a:115c::1".parse().unwrap(),
+        ];
         assert_eq!(
-            address("100.73.216.32\nfd7a:115c::1\n").as_deref(),
-            Some("100.73.216.32")
+            addresses("100.73.216.32\n fd7a:115c::1 \n").collect::<Vec<_>>(),
+            both
         );
-        assert_eq!(address("\n"), None);
+        assert_eq!(
+            addresses(
+                "
+not an address
+"
+            )
+            .next(),
+            None
+        );
         assert_eq!(
             cert_domains(r#"{"CertDomains": ["a.tail.ts.net"]}"#).unwrap(),
             ["a.tail.ts.net"]

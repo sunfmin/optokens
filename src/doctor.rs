@@ -30,6 +30,24 @@ pub enum Finding {
     NoCert,
 }
 
+/// `tailscale` is not on `PATH`.
+pub fn tailscale_missing() -> Refusal {
+    Refusal::of(
+        &Finding::TailscaleMissing,
+        "`tailscale` is not on PATH",
+        "install Tailscale (https://tailscale.com/download) and put `tailscale` on PATH",
+    )
+}
+
+/// `tailscale ip` gave no address, `why`.
+pub fn no_tailnet_address(why: &str) -> Refusal {
+    Refusal::of(
+        &Finding::NoTailnetAddress,
+        format!("`tailscale ip`: {why}"),
+        "run `tailscale up`",
+    )
+}
+
 /// What doctor reads of the world: the environment and `PATH`.
 pub struct World {
     pub env: Env,
@@ -124,23 +142,16 @@ fn check_op(world: &World, findings: &mut Vec<Refusal>) -> Value {
 /// The tailnet address and the cert domains, or null for each not found.
 fn check_tailscale(world: &World, findings: &mut Vec<Refusal>) -> (Value, Value) {
     let Some(path) = program::find(tailscale::PROGRAM, world.path.as_deref()) else {
-        findings.push(Refusal::of(
-            &Finding::TailscaleMissing,
-            "`tailscale` is not on PATH",
-            "install Tailscale (https://tailscale.com/download) and put `tailscale` on PATH",
-        ));
+        findings.push(tailscale_missing());
         return (Value::Null, Value::Null);
     };
-    let address = run(&path, tailscale::IP)
-        .and_then(|ran| tailscale::address(&ran.stdout).ok_or("it printed no address".into()));
+    let address = run(&path, tailscale::IP).and_then(|ran| {
+        tailscale::addresses(&ran.stdout)
+            .next()
+            .ok_or("it printed no address".into())
+    });
     let address = address
-        .map_err(|why| {
-            findings.push(Refusal::of(
-                &Finding::NoTailnetAddress,
-                format!("`tailscale ip`: {why}"),
-                "run `tailscale up`",
-            ))
-        })
+        .map_err(|why| findings.push(no_tailnet_address(&why)))
         .ok();
     let address = json!({ "path": path, "address": address });
     let domains =
@@ -154,7 +165,7 @@ fn check_tailscale(world: &World, findings: &mut Vec<Refusal>) -> (Value, Value)
             findings.push(Refusal::of(
                 &Finding::NoCert,
                 format!("`tailscale status --json`: {why}, so `tailscale cert` cannot be used"),
-                "turn on MagicDNS and HTTPS Certificates in the DNS settings of the Tailscale admin console",
+                tailscale::HTTPS_FIX,
             ));
             Value::Null
         }
