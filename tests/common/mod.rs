@@ -131,12 +131,11 @@ impl Host {
     }
 
     /// `script` run by `/bin/bash -c` as [`Host::run`] runs optokens, which
-    /// it finds as `"$OPTOKENS"`: for `<(command)`. `env` reaches bash too,
-    /// so a value in it reaches a builtin `printf` without a command line.
+    /// it finds as `"$0"`: for `<(command)`. `env` reaches bash too, so a
+    /// value in it reaches a builtin `printf` without a command line.
     pub fn bash(&self, script: &str, env: &[(&str, &str)]) -> Ran {
-        let optokens = [("OPTOKENS", env!("CARGO_BIN_EXE_optokens"))];
-        let env: Vec<_> = env.iter().chain(&optokens).copied().collect();
-        let child = self.command("/bin/bash", &["-c", script], &env);
+        let optokens = env!("CARGO_BIN_EXE_optokens");
+        let child = self.command("/bin/bash", &["-c", script, optokens], env);
         ran(child.wait_with_output().unwrap())
     }
 

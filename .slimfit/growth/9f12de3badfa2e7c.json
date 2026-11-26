@@ -1,0 +1,10 @@
+{
+  "tree": "5bd14228fddfcacf14a680eeac1eacaf7ee3cd81+7e1e5632a7fedd00",
+  "lines": 87,
+  "serves": "optokens#13",
+  "considered": "stdin_value's newline/empty/UTF-8 checks, now shared through piped_text rather than copied; merge's duplicate_label and shape_change, reused unchanged for pipe Fields; Host::spawn, generalized into Host::command so the bash runner adds no second spawn",
+  "reviewer": "codex:01a218db-3ad9-7041-9e5d-4337e8b7df5a:default",
+  "author": "claude-code:e538c35a-7d09-5bfa-9c50-7ab514c1c01a:opus",
+  "cut": "In src/secret.rs, build both NotAPipe refusals through one local closure that takes the diagnostic text and supplies the shared fault and fix. In tests/common/mod.rs and tests/secrets.rs, pass the optokens executable as Bash’s $0 and use the caller’s environment directly, removing the OPTOKENS environment entry and vector copy.",
+  "answer": "Both cuts made: one not_a_pipe closure in pipe_field; bash gets optokens as $0, no OPTOKENS env entry nor vector copy."
+}

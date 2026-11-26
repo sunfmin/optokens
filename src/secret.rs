@@ -271,21 +271,22 @@ pub fn pipe_field(
     arg: &str,
     read: impl FnOnce(&str) -> Option<Vec<u8>>,
 ) -> Result<Field, Refusal> {
-    let fix =
-        "give a command's output through `--field-from-pipe <Label>=<(command)`, never a file";
-    let Some((label, path)) = arg.split_once('=').filter(|(l, _)| !l.is_empty()) else {
-        return Err(Refusal::of(
+    let not_a_pipe = |fault: String| {
+        Refusal::of(
             &Fault::NotAPipe,
-            format!("`--field-from-pipe` number {n} names no `Label=` before its pipe"),
-            fix,
-        ));
+            fault,
+            "give a command's output through `--field-from-pipe <Label>=<(command)`, never a file",
+        )
+    };
+    let Some((label, path)) = arg.split_once('=').filter(|(l, _)| !l.is_empty()) else {
+        return Err(not_a_pipe(format!(
+            "`--field-from-pipe` number {n} names no `Label=` before its pipe"
+        )));
     };
     let Some(bytes) = read(path) else {
-        return Err(Refusal::of(
-            &Fault::NotAPipe,
-            format!("`--field-from-pipe {label}=` names no pipe that can be read"),
-            fix,
-        ));
+        return Err(not_a_pipe(format!(
+            "`--field-from-pipe {label}=` names no pipe that can be read"
+        )));
     };
     match piped_text(bytes) {
         Ok(value) => Ok(Field::new(label, &value, Visibility::Concealed)),

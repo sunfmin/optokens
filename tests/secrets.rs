@@ -343,7 +343,7 @@ fn a_single_value_is_got_bare_and_never_exported() {
     );
     assert_eq!(kinds(&shape.json()), ["shape_change"]);
     let pipe = host.bash(
-        r#""$OPTOKENS" put cloudflare --field-from-pipe Token=<(printf x)"#,
+        r#""$0" put cloudflare --field-from-pipe Token=<(printf x)"#,
         &[TOKEN],
     );
     assert_eq!(kinds(&pipe.json()), ["shape_change"]);
@@ -390,7 +390,7 @@ fn a_value_is_in_no_command_line_and_no_temporary_file() {
     // The values reach bash in its environment, which it drops before it
     // runs optokens: only its builtin `printf` holds them.
     let pipes = host.bash(
-        r#"a=$A b=$B; unset A B; "$OPTOKENS" put db --field-from-pipe Key=<(printf %s "$a") --field-from-pipe Salt=<(printf %s "$b")"#,
+        r#"a=$A b=$B; unset A B; "$0" put db --field-from-pipe Key=<(printf %s "$a") --field-from-pipe Salt=<(printf %s "$b")"#,
         &[TOKEN, ("A", &format!("{MARKER}-a")), ("B", &format!("{MARKER}-b"))],
     );
     assert_eq!(
@@ -436,7 +436,7 @@ fn a_value_is_in_no_command_line_and_no_temporary_file() {
 fn two_pipes_are_stored_concealed_in_one_put_and_one_write() {
     let host = host();
     let put = host.bash(
-        r#""$OPTOKENS" put deploy-db --set User=svc --field-from-pipe Password=<(printf 'p w\n') --field-from-pipe "SigningKey="<(printf k)"#,
+        r#""$0" put deploy-db --set User=svc --field-from-pipe Password=<(printf 'p w\n') --field-from-pipe "SigningKey="<(printf k)"#,
         &[TOKEN],
     );
     assert_eq!(put.code, 0, "{}{}", put.stdout, put.stderr);
@@ -472,7 +472,7 @@ fn a_pipe_that_is_no_pipe_or_empty_is_refused_before_the_vault() {
     std::fs::write(&file, "a value in a file").unwrap();
     let refused = host.bash(
         &format!(
-            r#""$OPTOKENS" put db --field-from-pipe File={} --field-from-pipe Gone=/nonexistent/{MARKER} --field-from-pipe Inline={MARKER}-value --field-from-pipe Empty=<(printf '\n') --field-from-pipe {MARKER}"#,
+            r#""$0" put db --field-from-pipe File={} --field-from-pipe Gone=/nonexistent/{MARKER} --field-from-pipe Inline={MARKER}-value --field-from-pipe Empty=<(printf '\n') --field-from-pipe {MARKER}"#,
             file.display()
         ),
         &[TOKEN],
@@ -503,7 +503,7 @@ fn a_pipe_that_is_no_pipe_or_empty_is_refused_before_the_vault() {
         "no refusal before the vault calls op"
     );
     let twice = host.bash(
-        r#"printf s | "$OPTOKENS" put db --set A=1 --field-from-stdin B --field-from-pipe A=<(printf x) --field-from-pipe B=<(printf y)"#,
+        r#"printf s | "$0" put db --set A=1 --field-from-stdin B --field-from-pipe A=<(printf x) --field-from-pipe B=<(printf y)"#,
         &[TOKEN],
     );
     assert_eq!(kinds(&twice.json()), ["duplicate_label", "duplicate_label"]);
