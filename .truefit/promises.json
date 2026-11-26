@@ -11,6 +11,11 @@
     "source": "docs/adr/0007-a-person-enters-a-value-on-a-one-time-link.md:3",
     "why": "the owner's words quoted as the decision's source; the promises they make are registered from the ADR's own sentences"
   },
+  "340fd3aa7e3f": {
+    "mark": "promise",
+    "sentence": "The link listens only on the tailnet address `tailscale ip` names that is on one of this host's interfaces; with no `tailscale` or no such address it stores nothing, and its refusal names what is missing.",
+    "source": "docs/adr/0008-the-one-time-links-rules.md:21"
+  },
   "4bb5ad4cd9a9": {
     "mark": "not",
     "sentence": "`optokens --help` is the manual and its only copy; keep it true whenever behaviour changes.",
@@ -25,6 +30,11 @@
     "mark": "promise",
     "sentence": "`put --fields` and `init` print a one-time link and wait for its one submission, departing from agent-cli's \"never ask\": the owner's spec makes the link the way in for a secret a person knows, and there is no popup or terminal prompt to fall back on.",
     "source": "docs/adr/0007-a-person-enters-a-value-on-a-one-time-link.md:5"
+  },
+  "804fb0721590": {
+    "mark": "promise",
+    "sentence": "A wrong path answers 404 and a method other than GET or POST 405; a POST with an empty field answers the form again, 400, with \"Every field needs a value.\"",
+    "source": "docs/adr/0008-the-one-time-links-rules.md:17"
   },
   "9aa804054b37": {
     "mark": "promise",
@@ -51,6 +61,11 @@
     "sentence": "`env` prints `export NAME='value'` lines on every OS, for sh, bash and zsh, Git Bash and WSL on Windows included, as mytokens prints them (ADR 0001). There is no PowerShell form yet: `env --shell powershell` is added when someone needs it.",
     "source": "docs/adr/0005-env-prints-posix-exports.md:3"
   },
+  "ed3cdea1b429": {
+    "mark": "promise",
+    "sentence": "The page names the Secret (`<service>/<account>`) and its Description, and has one input per Field it asks for: plain text for a `--show` Field, a password input for the rest; a Field already set shows only \"already set\", its value never on the page, and every piece of text on it is HTML-escaped.",
+    "source": "docs/adr/0008-the-one-time-links-rules.md:19"
+  },
   "f1ddb985d2b9": {
     "mark": "promise",
     "sentence": "optokens is built for agent-cli's five platforms: macOS arm64 and x86_64, Linux arm64 and x86_64 (musl), and Windows x86_64 (msvc). There is no Windows host to run the tests on, so the gate checks the Windows build with clippy for `x86_64-pc-windows-msvc`, and a Windows-only branch cannot rot unbuilt.",
@@ -66,5 +81,11 @@
     "mark": "promise",
     "sentence": "Every command prints one JSON object on stdout; a failure is `{\"error\": …}` with a non-zero exit.",
     "source": "docs/adr/0001-one-json-object-but-get-and-env.md:5"
+  },
+  "fdac7c74a0d1": {
+    "mark": "not",
+    "sentence": "Listen on every interface and check the client's address.",
+    "source": "docs/adr/0008-the-one-time-links-rules.md:27",
+    "why": "an option the ADR weighed and rejected, not what optokens does"
   }
 }
