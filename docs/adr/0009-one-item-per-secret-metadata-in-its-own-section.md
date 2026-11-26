@@ -4,6 +4,8 @@ Decided by the tech lead for Felix, when this storage was planned: 「Chose: a s
 
 One Secret is one item of the vault, of the category `SECURE_NOTE`, titled as decision record 13 says (it was `<service>/<account>`) and tagged `optokens`. Each Field is a field of the section `fields`, labelled with the Field's label; a single value is that section's one field, `value`. The kind (`static` or `profile`), the description, and the shape (`value` or `fields`) are fields of the section `optokens`.
 
+The Meta is a field `meta` of the section `optokens` too: one JSON object written compact, absent when the Secret has none (an item written before Meta has none). Meta is a field of its own, not folded into the description: it is data a program reads, not prose (Felix, 2026-11-27).
+
 Reading an item back gives exactly the Secret that was stored. An item without the `optokens` tag, or whose `optokens` section is not this shape, is refused by name, never guessed at. `put` reads the item, merges, and writes it whole with `op item create` or `op item edit`, the template on `op`'s stdin.
 
 ## Considered Options
