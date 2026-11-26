@@ -1,0 +1,26 @@
+{
+  "tree": "9cdd37403d064c0722de3be580edfae71dd63ead+d1fba762150c532c",
+  "picker": "codex:01a21759-655d-7eb1-8ffb-fb31e8bf845d:default",
+  "author": "claude-code:75a7ebe0-ee23-5f8e-b1e6-018642b30610:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/link.rs:171:56: replace | with ^ in same",
+        "why": "XOR can cancel multiple byte differences, but the deliberate same-length wrong-path case changes only one byte and the random cases may miss cancellation.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/link/page.rs:50:5: replace sent -> String with String::new()",
+        "why": "Successful POST tests check the status, returned values, and absence of the secret, so an empty confirmation page can pass.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  },
+  "removed_tests": {
+    "rust": [
+      "src/tailscale.rs:42: the_first_address_and_the_cert_domains_are_read_from_its_answers"
+    ]
+  }
+}
