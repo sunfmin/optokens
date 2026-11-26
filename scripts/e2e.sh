@@ -1,7 +1,7 @@
 #!/bin/sh
 # The end-to-end check against a real 1Password vault and the real `op`:
 # put (a Meta among it) -> list -> get -> env -> put again (upsert) -> `op read op://` -> a put over the item retitled as
-# an earlier optokens titled it -> a put of two pipes -> rm, each answer checked, the item and its field
+# an earlier optokens titled it -> a put of two pipes -> a put over mytokens' tags and section -> rm, each answer checked, the item and its field
 # types checked in the vault through `op item get`, and `ps` sampled during the put for the value. Outside the gate: it needs the network and a token.
 #
 #   scripts/e2e.sh <mytokens-profile> [vault]
@@ -193,6 +193,31 @@ printf '%s' "$item" | jq -e --arg a "$pipe1" --arg b "$pipe2" \
     '([.fields[] | select(.section.label == "fields") | {(.label): .value}] | add) as $f | $f.PIPE1 == $a and $f.PIPE2 == $b' >/dev/null ||
     fail "the vault's PIPE1 or PIPE2 is not the value its pipe carried"
 echo "ok: the vault's PIPE1 and PIPE2 are the values their pipes carried"
+
+say "op item edit $id < its template, tagged mytokens and mytokens-digest-e2e, with a section mytokens  (as mytokens writes it)"
+# A whole template on stdin, as mytokens writes: an assignment such as
+# 'mytokens.origin[text]=e2e' makes op itself reorder the fields.
+op item get "$id" --vault "$vault" --format json |
+    jq '.tags += ["mytokens","mytokens-digest-e2e"] | .sections += [{"id":"mytokens","label":"mytokens"}]
+        | .fields += [{"id":"mytokens.origin","section":{"id":"mytokens"},"type":"STRING","label":"origin","value":"e2e"}]' |
+    op item edit "$id" --vault "$vault" --format json >/dev/null
+item=$(op item get "$id" --vault "$vault" --format json)
+printf '%s' "$item" | jq -c '{tags, sections: [.sections[]? | .label]}'
+run list
+check "a section optokens does not know is read past" '[.secrets[] | select(.service == "'"$service"'") | .fields] == [["A","TOKEN","PIPE1","PIPE2"]]' "$out"
+say "optokens put $service --set A=3, then --set NEW=4"
+run put "$service" --set "A=3"
+check "put changed A, the order kept" '.changed and .fields == ["A","TOKEN","PIPE1","PIPE2"]' "$out"
+run put "$service" --set "NEW=4"
+check "a new Field goes last" '.changed and .fields == ["A","TOKEN","PIPE1","PIPE2","NEW"]' "$out"
+item=$(op item get "$id" --vault "$vault" --format json)
+printf '%s' "$item" | jq -c '{tags, sections: [.sections[]? | .label], mytokens: [.fields[] | select(.section.label == "mytokens") | {(.label): .value}]}'
+check "put kept the tags it does not own" '(.tags | sort) == ["mytokens","mytokens-digest-e2e","optokens"]' "$item"
+check "put kept the section mytokens and its field" '[.fields[] | select(.section.label == "mytokens") | {(.label): .value}] == [{"origin":"e2e"}]' "$item"
+check "the vault's fields in their order" '[.fields[] | select(.section.label == "fields") | .label] == ["A","TOKEN","PIPE1","PIPE2","NEW"]' "$item"
+run env "$service"
+[ "$(printf '%s\n' "$out" | sed 's/=.*//')" = "$(printf 'export %s\n' A TOKEN PIPE1 PIPE2 NEW)" ] || fail "env does not print A TOKEN PIPE1 PIPE2 NEW in order"
+echo "ok: env prints A TOKEN PIPE1 PIPE2 NEW in order"
 
 say "optokens rm $service"
 run rm "$service"

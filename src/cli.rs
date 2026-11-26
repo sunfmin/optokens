@@ -373,7 +373,7 @@ struct AccountTopic;
 ///
 /// The type changes only how 1Password shows the field: `get`, `env` and `list` give out the same either way. An item with another type in the section `{const:VALUES}` is refused (`not_optokens`).
 ///
-/// optokens reads only items tagged `{const:TAG}`. An item of a Secret's title (new or old) without the tag, or one whose section `{const:META}` is not this layout, is refused by name (`not_optokens`), never guessed at. Edit a Secret with optokens, not in 1Password.
+/// optokens reads only items tagged `{const:TAG}`. An item of a Secret's title (new or old) without the tag, or one whose section `{const:META}` is not this layout, is refused by name (`not_optokens`), never guessed at. Edit a Secret's values with optokens, not in 1Password. What optokens does not own is read past and kept by every `put`: the item's other tags (mytokens' `mytokens` and `mytokens-digest-<hash>`), its other sections and their fields, and its notes. `put` keeps the order of the fields in `{const:VALUES}`, which is the order `env` prints, and adds a new Field after them.
 ///
 /// ## The faults
 ///

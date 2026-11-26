@@ -930,3 +930,73 @@ fn an_item_without_meta_has_none_and_a_bad_meta_is_refused_by_name() {
         refused.stdout
     );
 }
+
+/// mytokens writes Secrets in this layout too, tagged its own way and with
+/// sections of its own: `put` keeps every tag and section it does not own,
+/// and the order of the Fields; a new Field goes last.
+#[test]
+fn put_keeps_the_tags_sections_and_field_order_it_does_not_own() {
+    let mut item = stored(
+        "m1",
+        "deploy",
+        json!(["optokens", "mytokens", "mytokens-digest-abc"]),
+        json!([
+            { "id": "notesPlain", "type": "STRING", "purpose": "NOTES", "label": "notesPlain", "value": "a note" },
+            field("fields", "C", "3"),
+            field("fields", "A", "1"),
+            field("fields", "B", "2"),
+            field("optokens", "service", "deploy"),
+            field("optokens", "account", "default"),
+            field("optokens", "kind", "profile"),
+            field("optokens", "shape", "fields"),
+            field("mytokens", "origin", "laptop"),
+        ]),
+    );
+    item["sections"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({ "id": "mytokens", "label": "mytokens" }));
+    let host = seeded(json!([item]));
+    assert_eq!(
+        run(&host, &["get", "deploy", "--json"]).json()["fields"],
+        json!({ "C": "3", "A": "1", "B": "2" }),
+        "a section optokens does not know is read past, not refused"
+    );
+    for put in [["--set", "A=10"], ["--set", "D=4"]] {
+        let args = [&["put", "deploy"][..], &put[..]].concat();
+        assert_eq!(run(&host, &args).json()["changed"], true);
+    }
+    let item = &host.state()["op"]["items"][0];
+    assert_eq!(
+        item["tags"],
+        json!(["optokens", "mytokens", "mytokens-digest-abc"])
+    );
+    let held: Vec<(Value, Value)> = item["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["section"]["label"] != "optokens")
+        .map(|f| (f["section"]["label"].clone(), f["label"].clone()))
+        .collect();
+    assert_eq!(
+        held,
+        [
+            (json!("fields"), json!("C")),
+            (json!("fields"), json!("A")),
+            (json!("fields"), json!("B")),
+            (json!("fields"), json!("D")),
+            (Value::Null, json!("notesPlain")),
+            (json!("mytokens"), json!("origin")),
+        ]
+    );
+    let notes = item["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["purpose"] == "NOTES");
+    assert_eq!(notes.unwrap()["value"], "a note");
+    assert_eq!(
+        run(&host, &["env", "deploy"]).stdout,
+        "export C='3'\nexport A='10'\nexport B='2'\nexport D='4'\n"
+    );
+}

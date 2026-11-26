@@ -21,10 +21,12 @@ pub struct Store {
     vault: String,
 }
 
-/// A Secret found in the vault: its item's id, what it holds, and whether
-/// the item is in this optokens' layout ([`item::current`]).
+/// A Secret found in the vault: its item's id, the item as `op` printed it,
+/// what it holds, and whether the item is in this optokens' layout
+/// ([`item::current`]).
 pub struct Found {
     pub id: String,
+    pub item: Value,
     pub secret: Secret,
     pub current: bool,
 }
@@ -102,6 +104,7 @@ impl Store {
                 let current = item::current(&item, name);
                 found.push(Found {
                     id,
+                    item,
                     secret,
                     current,
                 });
@@ -131,10 +134,19 @@ impl Store {
         }
     }
 
-    /// Writes `secret` as `name`'s item: over the item `id`, or a new one.
-    pub fn write(&self, id: Option<&str>, name: &Name, secret: &Secret) -> Result<(), Refusal> {
-        let template = item::template(name, secret).to_string().into_bytes();
-        let call = id.map_or(Call::Create, Call::Edit);
+    /// Writes `secret` as `name`'s item: over the item `found`, keeping what
+    /// optokens does not own of it, or a new one.
+    pub fn write(
+        &self,
+        found: Option<&Found>,
+        name: &Name,
+        secret: &Secret,
+    ) -> Result<(), Refusal> {
+        let stored = found.map(|f| &f.item);
+        let template = item::template(name, secret, stored)
+            .to_string()
+            .into_bytes();
+        let call = found.map_or(Call::Create, |f| Call::Edit(&f.id));
         self.run(call, Some(template)).map(drop)
     }
 

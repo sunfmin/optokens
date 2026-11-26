@@ -4,7 +4,7 @@
 use serde_json::{Value, json};
 
 /// The item `op` keeps of a template: its id and vault given, the category's
-/// notes field added, each field's section named by its label, and an empty
+/// notes field added when the template has none, each field's section named by its label, and an empty
 /// value left out.
 pub fn keep(template: &Value, id: &str, vault: &str) -> Value {
     let mut item = template.clone();
@@ -16,10 +16,14 @@ pub fn keep(template: &Value, id: &str, vault: &str) -> Value {
         .flatten()
         .map(|s| (s["id"].as_str().unwrap().to_string(), s["label"].clone()))
         .collect();
-    let mut fields = vec![
-        json!({ "id": "notesPlain", "type": "STRING", "purpose": "NOTES", "label": "notesPlain" }),
-    ];
-    for f in template["fields"].as_array().into_iter().flatten() {
+    let given = template["fields"].as_array().into_iter().flatten();
+    let mut fields = Vec::new();
+    if !given.clone().any(|f| f["purpose"] == "NOTES") {
+        fields.push(
+            json!({ "id": "notesPlain", "type": "STRING", "purpose": "NOTES", "label": "notesPlain" }),
+        );
+    }
+    for f in given {
         let mut f = f.clone();
         if let Some(section) = f["section"]["id"].as_str() {
             f["section"] = json!({ "id": section, "label": labels[section] });
