@@ -80,11 +80,14 @@ impl Store {
     }
 
     /// `name`'s Secret, `None` when the vault has none: the one item of its
-    /// title, or its earlier title, whose section names it.
+    /// title, or its earlier title, whose section names it. Refused when an
+    /// item without the tag holds either title, as a Sync of this process
+    /// saw it (`put` and `rm` sync first).
     pub fn find(&mut self, name: &Name) -> Result<Option<Found>, Refusal> {
         let items = self.items()?;
+        let others = self.copy.others().unwrap_or_default();
         let mut found = Vec::new();
-        for item in item::candidates(&items, &[], name)? {
+        for item in item::candidates(&items, others, name)? {
             let (held, secret) = item::read(item)?;
             if held == *name {
                 found.push(Found {
@@ -139,7 +142,7 @@ impl Store {
         let fix = match e {
             Error::RateLimited(_) => "wait for the service account's hourly budget of reads and writes to refill (`op service-account ratelimit` shows it), then run the command again".to_string(),
             Error::OutOfDate(_) => "update optokens (`brew upgrade optokens`): its 1Password Core may be older than 1Password's servers".to_string(),
-            Error::NoItem(_) | Error::Failed(_) => format!(
+            Error::NoVault(_) | Error::NoItem(_) | Error::Failed(_) => format!(
                 "run `optokens init --check`, and see that the service account can reach the vault `{}`",
                 self.vault
             ),
@@ -181,7 +184,7 @@ impl From<Unsynced> for Refusal {
 /// Whether `e` is opcore's answer that the service account sees no vault of
 /// that title.
 fn unseen(e: &Error) -> bool {
-    matches!(e, Error::Failed(m) if m.starts_with("the service account cannot read a vault titled"))
+    matches!(e, Error::NoVault(_))
 }
 
 /// The Core the Copy signs in on: 1Password's, made only when it first
