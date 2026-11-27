@@ -305,6 +305,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_vault_id_it_does_not_answer_is_refused_as_the_core_refuses_it() {
+        let state = json!({ "core": { "vaults": ["optokens"] } });
+        let at = |id: &str| json!({ "vault_id": id });
+        assert_eq!(unknown_vault(&state, "ItemsGetAll", &at("v0")), Ok(()));
+        assert_eq!(unknown_vault(&state, "ItemsList", &json!({})), Ok(()));
+        for (method, message) in [
+            ("ItemsGetAll", "bad request"),
+            ("ItemsList", "item couldn't be found"),
+            ("ItemsPut", "item couldn't be found"),
+        ] {
+            assert_eq!(
+                unknown_vault(&state, method, &at("v9")),
+                Err(error("ItemApi", message)),
+                "{method}"
+            );
+        }
+    }
+
+    #[test]
     fn a_put_answers_the_item_one_version_on() {
         let mut state = json!({ "core": { "items": [] } });
         let made = answer(

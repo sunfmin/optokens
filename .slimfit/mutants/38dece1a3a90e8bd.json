@@ -1,0 +1,16 @@
+{
+  "tree": "ea7253ee800c4d0b511b8ef61e83301bcf685544+13fad75236cc0fd1",
+  "picker": "codex:01a21cfb-7762-74b0-88f6-cf632aaf9ae5:default",
+  "author": "claude-code:7a019a0d-359b-5957-925b-352086c170b3:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/standin.rs:295:29: replace == with != in unknown_vault",
+        "why": "The stale vault ID test checks recovery through ItemsList and leaves the distinct \"bad request\" response for ItemsGetAll unchecked.",
+        "outcome": "killed",
+        "first_outcome": "survived"
+      }
+    ]
+  },
+  "added_lines": 30
+}
