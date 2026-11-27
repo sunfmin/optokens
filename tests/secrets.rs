@@ -1064,3 +1064,118 @@ fn put_keeps_the_tags_sections_and_field_order_it_does_not_own() {
         "export C='3'\nexport A='10'\nexport B='2'\nexport D='4'\n"
     );
 }
+
+#[test]
+fn mv_renames_a_secret_in_place_with_one_sync_and_one_write() {
+    let host = host();
+    let put = piped(
+        &host,
+        &[
+            "put",
+            "agent-account",
+            "--kind",
+            "profile",
+            "--description",
+            "Claude Code, Felix's ultra",
+            "--meta",
+            r#"{"plan":"ultra"}"#,
+            "--set",
+            "HARNESS=claude-code",
+            "--field-from-stdin",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+        ],
+        "sk-oauth",
+    );
+    assert_eq!(put.code, 0, "{}", put.stdout);
+    let before = run(&host, &["get", "agent-account", "--json"]).json();
+    let id = host.items()[0]["id"].clone();
+    host.forget_calls();
+
+    let mv = run(
+        &host,
+        &["mv", "agent-account", "claude", "--to-account", "ultra"],
+    );
+    assert_eq!(
+        (mv.code, mv.json()),
+        (
+            0,
+            json!({ "secret": "claude/ultra", "from": "agent-account/default" })
+        )
+    );
+    let methods = calls(&host);
+    assert_eq!(
+        methods.iter().filter(|m| m.as_str() == "ItemsList").count(),
+        1,
+        "one Sync: {methods:?}"
+    );
+    let writes = ["ItemsPut", "ItemsCreateAll", "ItemsDeleteAll"];
+    assert_eq!(
+        methods
+            .iter()
+            .filter(|m| writes.contains(&m.as_str()))
+            .collect::<Vec<_>>(),
+        ["ItemsPut"],
+        "one write, an edit: {methods:?}"
+    );
+
+    let items = host.items();
+    assert_eq!(items.as_array().unwrap().len(), 1);
+    assert_eq!(items[0]["id"], id, "the same item");
+    assert_eq!(items[0]["title"], "claude.ultra");
+    let mut after = run(&host, &["get", "claude", "--account", "ultra", "--json"]).json();
+    assert_eq!(after["service"], "claude");
+    assert_eq!(after["account"], "ultra");
+    for key in ["service", "account"] {
+        after[key] = before[key].clone();
+    }
+    assert_eq!(after, before, "every Field, its kind, description and Meta");
+    assert_eq!(
+        host.field_types("claude.ultra"),
+        json!({ "HARNESS": "Text", "CLAUDE_CODE_OAUTH_TOKEN": "Concealed" })
+    );
+    assert_eq!(
+        kinds(&run(&host, &["get", "agent-account"]).error()),
+        ["not_found"]
+    );
+    assert_eq!(
+        kinds(&run(&host, &["mv", "agent-account", "x"]).json()),
+        ["not_found"]
+    );
+}
+
+#[test]
+fn mv_onto_a_secret_or_an_untagged_title_refuses_and_writes_nothing() {
+    let host = host();
+    for service in ["a", "b"] {
+        let put = run(&host, &["put", service, "--set", &format!("K={service}")]);
+        assert_eq!(put.code, 0, "{}", put.stdout);
+    }
+    let mut state = host.state();
+    state["core"]["items"].as_array_mut().unwrap().push(stored(
+        "s1",
+        "github",
+        json!(["personal"]),
+        json!([value(0, "value", "x")]),
+    ));
+    host.set_state(&state);
+    let items = host.items();
+    host.forget_calls();
+
+    let taken = run(&host, &["mv", "a", "b"]);
+    assert_eq!(taken.code, 2);
+    assert_eq!(kinds(&taken.json()), ["exists"]);
+    let stranger = run(&host, &["mv", "a", "github"]);
+    assert_eq!(kinds(&stranger.json()), ["not_optokens"]);
+    let itself = run(&host, &["mv", "a", "a"]);
+    assert_eq!(kinds(&itself.json()), ["exists"]);
+    assert_eq!(kinds(&run(&host, &["mv", "a", "x/y"]).json()), ["bad_name"]);
+
+    let methods = host.core_calls();
+    assert!(
+        !methods
+            .iter()
+            .any(|m| ["ItemsPut", "ItemsCreateAll", "ItemsDeleteAll"].contains(&m.as_str())),
+        "{methods:?}"
+    );
+    assert_eq!(host.items(), items);
+}
