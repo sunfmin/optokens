@@ -1255,3 +1255,29 @@ fn mv_onto_a_secret_or_an_untagged_title_refuses_and_writes_nothing() {
     );
     assert_eq!(host.items(), items);
 }
+
+/// 1Password's rate limit is refused with a fix that sends the agent to
+/// `op service-account ratelimit` and says the account's budget is daily:
+/// waiting an hour does not refill it.
+#[test]
+fn a_rate_limit_is_refused_with_a_fix_that_names_both_budgets() {
+    let host = host();
+    assert_eq!(run(&host, &["put", "db", "--set", "A=1"]).code, 0);
+    let mut state = host.state();
+    state["core"]["fail"] = json!({
+        "ItemsList": { "name": "RateLimitExceeded", "message": "rate limit exceeded" }
+    });
+    host.set_state(&state);
+
+    let fresh = run(&host, &["get", "db", "--fresh"]);
+    assert_eq!((fresh.code, fresh.stdout.as_str()), (2, ""));
+    let error = fresh.error();
+    assert_eq!(kinds(&error), ["vault_failed"]);
+    let fix = error["error"][0]["fix"].as_str().unwrap();
+    assert!(fix.contains("`op service-account ratelimit`"), "{fix}");
+    assert!(
+        fix.contains("the account's") && fix.contains("day"),
+        "{fix}"
+    );
+    assert!(!fix.contains("hourly budget of reads and writes"), "{fix}");
+}

@@ -9,7 +9,9 @@
 //!   a title, the `i`th with the id `v{i}`, or `{ "id", "title" }`; a call
 //!   naming another vault id is refused;
 //! - `core.token`: the one token it signs in (default any);
-//! - `core.fail`: `{ "<Method>": "<message>" }`, the Core's error for that call;
+//! - `core.fail`: `{ "<Method>": "<message>" }`, the Core's error for that call,
+//!   or `{ "<Method>": { "name", "message" } }` for an error of that name
+//!   (`RateLimitExceeded`);
 //! - `core.garble_writes`: a create answers its item with the values of its
 //!   section `fields` emptied;
 //! - `core.hang_ms`: each item call waits this long before it answers;
@@ -57,9 +59,15 @@ impl Standin {
             Some(calls) => calls.push(call),
             None => state["calls"] = json!([call]),
         }
-        match state["core"]["fail"][method].as_str() {
-            Some(message) => Err(error("Unknown", message)),
-            None => Ok(()),
+        let fail = &state["core"]["fail"][method];
+        match (
+            fail.as_str(),
+            fail["name"].as_str(),
+            fail["message"].as_str(),
+        ) {
+            (Some(message), _, _) => Err(error("Unknown", message)),
+            (None, Some(name), Some(message)) => Err(error(name, message)),
+            _ => Ok(()),
         }
     }
 }
