@@ -27,8 +27,9 @@ check() { # <what> <jq filter that must be true> <json>
     printf 'ok: %s\n' "$1"
 }
 
-cargo build --quiet
-bin=$PWD/target/debug/optokens
+# Release: the 1Password Core runs in wasmi, minutes per sign-in in a debug build.
+cargo build --release --quiet
+bin=$PWD/target/release/optokens
 # What follows has the token: from here on nothing prints a value.
 eval "$(mytokens env "$profile")"
 [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || fail "Profile $profile has no OP_SERVICE_ACCOUNT_TOKEN"
