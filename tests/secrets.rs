@@ -1385,6 +1385,7 @@ fn put_and_rm_wait_on_this_host_while_1password_cannot_be_reached() {
     for put in [
         &["put", "db", "--set", "A=1", "--set", "B=2"][..],
         &["put", "gone", "--set", "X=1"],
+        &["put", "kept", "--set", "K=1"],
     ] {
         assert_eq!(run(&host, put).code, 0);
     }
@@ -1444,7 +1445,14 @@ fn put_and_rm_wait_on_this_host_while_1password_cannot_be_reached() {
         .iter()
         .map(|s| (s["service"].as_str().unwrap(), &s["pending"]))
         .collect();
-    assert_eq!(marks, [("db", &json!(true)), ("new", &json!(true))]);
+    assert_eq!(
+        marks,
+        [
+            ("db", &json!(true)),
+            ("kept", &Value::Null),
+            ("new", &json!(true))
+        ]
+    );
 
     // Another host changes B meanwhile; then 1Password is reachable again.
     host.change("db", "B", "from-another-host");
@@ -1469,7 +1477,7 @@ fn put_and_rm_wait_on_this_host_while_1password_cannot_be_reached() {
         .iter()
         .map(|i| &i["title"])
         .collect();
-    assert_eq!(titles, [&json!("db"), &json!("new")]);
+    assert_eq!(titles, [&json!("db"), &json!("kept"), &json!("new")]);
     let db = run(&host, &["get", "db", "--json", "--fresh"]).json();
     assert_eq!(db["fields"]["A"], "10");
     assert_eq!(db["fields"]["B"], "from-another-host");
@@ -1477,4 +1485,11 @@ fn put_and_rm_wait_on_this_host_while_1password_cannot_be_reached() {
         run(&host, &["get", "new", "--field", "TOKEN"]).stdout,
         "s3cr3t-pending"
     );
+    let mut state = host.state();
+    state["core"]["fail"] = json!({ "ItemsList": "You do not have permission" });
+    host.set_state(&state);
+    let denied = stale(&["put", "db", "--set", "A=11"]);
+    assert_eq!(denied.code, 2, "{}{}", denied.stdout, denied.stderr);
+    assert_eq!(kinds(&denied.json()), ["vault_failed"]);
+    assert!(!host.config().join("copy.pending").exists());
 }
