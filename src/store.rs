@@ -180,9 +180,12 @@ impl Store {
 
     /// opcore's error `e` as the refusal `vault_failed`, with its fix.
     pub fn refused(&self, e: Error) -> Refusal {
-        let fix = match e {
+        let fix = match &e {
             Error::RateLimited(_) => "wait for 1Password's budget to refill, then run the command again: `op service-account ratelimit` shows which ran out and when it resets (the token's reads and writes refill within the hour, the account's requests within the day)".to_string(),
             Error::OutOfDate(_) => "update optokens (`brew upgrade optokens`): its 1Password Core may be older than 1Password's servers".to_string(),
+            Error::OtherToken(path) => format!(
+                "run with the token that wrote the waiting writes in `{path}`: its next Sync pushes them and the file goes; if that token is gone for good, move the file aside, losing what waits in it"
+            ),
             Error::NoVault(_) | Error::NoItem(_) | Error::Failed(_) => format!(
                 "run `optokens init --check`, and see that the service account can reach the vault `{}`",
                 self.vault

@@ -1333,13 +1333,23 @@ fn a_write_the_vault_cannot_take_now_waits_and_the_next_sync_pushes_it() {
         "the vault holds the old item only"
     );
     sealed(&host, &["SECRET-TWO", "SECRET-WEB"]);
-    let other = host.run(
-        &["get", "db", "--field", "A"],
-        &[(TOKEN.0, "ops_another")],
-        None,
+    let another = [(TOKEN.0, "ops_another")];
+    let other = host.run(&["get", "db", "--field", "A"], &another, None);
+    assert_eq!(
+        (other.code, other.stdout.as_str()),
+        (0, "1"),
+        "another token reads the vault without what waits: {}",
+        other.stderr
     );
-    assert_eq!(other.code, 2, "another token does not open what waits");
     assert!(other.stderr.contains("copy.pending"), "{}", other.stderr);
+    let refused = host.run(&["put", "db", "--set", "A=4"], &another, None);
+    assert_eq!(refused.code, 2, "another token's write is refused");
+    assert_eq!(kinds(&refused.json()), ["vault_failed"]);
+    assert!(
+        refused.stdout.contains("copy.pending"),
+        "{}",
+        refused.stdout
+    );
 
     let mut state = host.state();
     state["core"]["fail"] = Value::Null;
@@ -1355,6 +1365,12 @@ fn a_write_the_vault_cannot_take_now_waits_and_the_next_sync_pushes_it() {
     );
     let again = run(&host, &["put", "db", "--set", "A=3"]);
     assert_eq!(again.json()["pending"], false);
+    assert!(
+        !host.config().join("copy.pending").exists(),
+        "the push of the last waiting write removes the file"
+    );
+    let theirs = host.run(&["put", "db", "--set", "A=5"], &another, None);
+    assert_eq!((theirs.code, &theirs.json()["pending"]), (0, &json!(false)));
 }
 
 /// While 1Password cannot be reached (here its rate limit), `put` and `rm`

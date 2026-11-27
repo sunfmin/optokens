@@ -53,7 +53,7 @@ pub enum Fault {
     NotOptokens,
     /// Two items in the vault are the same Secret. Fix: delete one of them in 1Password.
     Ambiguous,
-    /// 1Password refused or failed a call (no such vault, no grant, its rate limit), the network failed, or 1Password answered what optokens' Core cannot read. Fix: the one the finding names: `optokens init --check` for a grant, waiting for the budget `op service-account ratelimit` shows ran out for a rate limit (the token's refills within the hour, the account's within the day), updating optokens for an answer it cannot read.
+    /// 1Password refused or failed a call (no such vault, no grant, its rate limit), the network failed, or 1Password answered what optokens' Core cannot read, or a write met the writes another token left waiting. Fix: the one the finding names: `optokens init --check` for a grant, waiting for the budget `op service-account ratelimit` shows ran out for a rate limit (the token's refills within the hour, the account's within the day), updating optokens for an answer it cannot read, running with the token that wrote the waiting writes.
     VaultFailed,
 }
 
