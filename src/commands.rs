@@ -141,7 +141,8 @@ fn put_secret(
     let (Some(name), true) = (name, faults.is_empty()) else {
         return Err(faults);
     };
-    let store = Store::open(env)?;
+    // A write is never based on a stale item: the Copy syncs first.
+    let mut store = opened(env, true)?;
     let found = store.find(&name).map_err(|r| vec![r])?;
     let existing = found.as_ref().map(|f| &f.secret);
     let single = bare && (!annotated || existing.is_none());
@@ -257,10 +258,24 @@ pub fn fresh_link(title: &str, description: Option<&str>, fields: Vec<link::Fiel
     )
 }
 
+/// The vault's Store, synced first when `fresh` (`--fresh`, and before a write).
+fn opened(env: &Env, fresh: bool) -> Result<Store, Vec<Refusal>> {
+    let mut store = Store::open(env)?;
+    if fresh {
+        store.sync().map_err(|r| vec![r])?;
+    }
+    Ok(store)
+}
+
 /// `name`'s Secret from the vault, or the refusal that it is not there.
-fn found(env: &Env, service: &str, account: &str) -> Result<(Name, secret::Secret), Vec<Refusal>> {
+fn found(
+    env: &Env,
+    service: &str,
+    account: &str,
+    fresh: bool,
+) -> Result<(Name, secret::Secret), Vec<Refusal>> {
     let name = Name::new(service, account).map_err(|r| vec![r])?;
-    let store = Store::open(env)?;
+    let mut store = opened(env, fresh)?;
     match store.find(&name).map_err(|r| vec![r])? {
         Some(found) => Ok((name, found.secret)),
         None => Err(vec![Refusal::of(
@@ -272,8 +287,15 @@ fn found(env: &Env, service: &str, account: &str) -> Result<(Name, secret::Secre
 }
 
 /// The value alone, or with `json` the whole Secret; errors on stderr.
-pub fn get(env: &Env, service: &str, account: &str, field: Option<&str>, json: bool) -> Answer {
-    let (name, secret) = match found(env, service, account) {
+pub fn get(
+    env: &Env,
+    service: &str,
+    account: &str,
+    field: Option<&str>,
+    json: bool,
+    fresh: bool,
+) -> Answer {
+    let (name, secret) = match found(env, service, account, fresh) {
         Ok(found) => found,
         Err(faults) => return Answer::refused_on_stderr(faults),
     };
@@ -287,8 +309,8 @@ pub fn get(env: &Env, service: &str, account: &str, field: Option<&str>, json: b
 }
 
 /// `export NAME='value'` lines; errors on stderr.
-pub fn env(env: &Env, service: &str, account: &str) -> Answer {
-    let exports = found(env, service, account)
+pub fn env(env: &Env, service: &str, account: &str, fresh: bool) -> Answer {
+    let exports = found(env, service, account, fresh)
         .and_then(|(name, secret)| secret::exports(&name, &secret).map_err(|r| vec![r]));
     match exports {
         Ok(lines) => Answer::raw(lines),
@@ -297,8 +319,8 @@ pub fn env(env: &Env, service: &str, account: &str) -> Answer {
 }
 
 /// Every Secret, never a value.
-pub fn list(env: &Env) -> Answer {
-    match Store::open(env).and_then(|store| store.all()) {
+pub fn list(env: &Env, fresh: bool) -> Answer {
+    match opened(env, fresh).and_then(|mut store| store.all()) {
         Ok(all) => Answer::json(&json!({
             "secrets": all.iter().map(|(n, s)| secret::summary(n, s)).collect::<Vec<_>>(),
         })),
@@ -311,10 +333,10 @@ pub fn rm(env: &Env, service: &str, account: &str) -> Answer {
     let removed = Name::new(service, account)
         .map_err(|r| vec![r])
         .and_then(|name| {
-            let store = Store::open(env)?;
+            let mut store = opened(env, true)?;
             let found = store.find(&name).map_err(|r| vec![r])?;
             if let Some(found) = &found {
-                store.delete(&found.id).map_err(|r| vec![r])?;
+                store.delete(&found.item.id).map_err(|r| vec![r])?;
             }
             Ok((name, found.is_some()))
         });

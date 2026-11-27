@@ -1,17 +1,21 @@
-//! `put`, `get`, `env`, `list` and `rm`, the real binary, with `op` replaced
-//! by the stand-in of `examples/standin.rs`, which keeps the vault's items in
-//! its state file as `op` keeps them.
+//! `put`, `get`, `env`, `list` and `rm`, the real binary, on the stand-in
+//! Core of `src/standin.rs`, which keeps the vault's items in its state file
+//! as the Core answers them, and records each call.
 #![cfg(unix)]
 
 mod common;
 
-use common::{Host, Ran};
+use common::{Host, Ran, meta, stored, value};
 use serde_json::{Value, json};
 
 const TOKEN: (&str, &str) = ("OP_SERVICE_ACCOUNT_TOKEN", "ops_test_token");
+/// What every Sync calls: a sign-in, the vault's id, one list.
+const SYNC: [&str; 3] = ["init_client", "VaultsList", "ItemsList"];
+/// A Copy past its Life at once.
+const STALE: (&str, &str) = ("OPTOKENS_TEST_COPY_LIFE_MS", "0");
 
 fn host() -> Host {
-    Host::new(&["op"], json!({ "op": {} }))
+    Host::new(&[], json!({ "core": {} }))
 }
 
 fn run(host: &Host, args: &[&str]) -> Ran {
@@ -22,22 +26,16 @@ fn piped(host: &Host, args: &[&str], stdin: &str) -> Ran {
     host.run(args, &[TOKEN], Some(stdin.as_bytes()))
 }
 
-/// Each `op` call's arguments, joined.
-fn op_lines(host: &Host) -> Vec<String> {
-    host.calls()
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|c| {
-            c["args"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|a| a.as_str().unwrap())
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
-        .collect()
+/// The Core's calls since the last time this was asked.
+fn calls(host: &Host) -> Vec<String> {
+    let calls = host.core_calls();
+    host.forget_calls();
+    calls
+}
+
+/// `SYNC` and then `more`.
+fn synced(more: &[&str]) -> Vec<String> {
+    SYNC.iter().chain(more).map(|c| c.to_string()).collect()
 }
 
 fn kinds(error: &Value) -> Vec<&str> {
@@ -49,25 +47,28 @@ fn kinds(error: &Value) -> Vec<&str> {
         .collect()
 }
 
-/// A vault item as `op item get` prints one optokens wrote, by hand.
-fn stored(id: &str, title: &str, tags: Value, fields: Value) -> Value {
-    json!({ "id": id, "title": title, "tags": tags, "category": "SECURE_NOTE",
-            "vault": { "id": "v", "name": "optokens" },
-            "sections": [{ "id": "fields", "label": "fields" }, { "id": "optokens", "label": "optokens" }],
-            "fields": fields })
-}
-
-fn field(section: &str, label: &str, value: &str) -> Value {
-    json!({ "id": format!("{section}.{label}"), "section": { "id": section, "label": section }, "type": "STRING", "label": label, "value": value })
-}
-
 fn seeded(items: Value) -> Host {
-    Host::new(&["op"], json!({ "op": { "items": items } }))
+    Host::new(&[], json!({ "core": { "items": items } }))
+}
+
+/// No file under the config directory holds any of `known` in plaintext:
+/// the Copy is sealed.
+fn sealed(host: &Host, known: &[&str]) {
+    for (path, bytes) in host.config_files() {
+        for k in known.iter().chain([&TOKEN.1]) {
+            assert!(
+                !bytes.windows(k.len()).any(|w| w == k.as_bytes()),
+                "`{k}` is in {}",
+                path.display()
+            );
+        }
+    }
 }
 
 #[test]
 fn put_list_get_env_rm_a_profile() {
     let host = host();
+    let known = ["Claude Code to GLM", "tok'en $HOME", "glm-4.6", "bigmodel"];
     let put = piped(
         &host,
         &[
@@ -91,16 +92,15 @@ fn put_list_get_env_rm_a_profile() {
                 "fields": ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] })
     );
     assert_eq!(
-        op_lines(&host),
-        [
-            "item list --vault optokens --format json",
-            "item create --vault optokens --format json -"
-        ]
+        calls(&host),
+        synced(&["ItemsCreateAll"]),
+        "a Sync, then one write, no read back"
     );
+    sealed(&host, &known);
 
     assert_eq!(
         host.field_types("glm"),
-        json!({ "ANTHROPIC_BASE_URL": "STRING", "ANTHROPIC_AUTH_TOKEN": "CONCEALED" }),
+        json!({ "ANTHROPIC_BASE_URL": "Text", "ANTHROPIC_AUTH_TOKEN": "Concealed" }),
         "--set is plain, stdin concealed"
     );
 
@@ -112,11 +112,9 @@ fn put_list_get_env_rm_a_profile() {
     );
     assert_eq!(again.json()["changed"], false);
     assert_eq!(
-        op_lines(&host)[2..],
-        [
-            "item list --vault optokens --format json",
-            "item get id1 --vault optokens --format json"
-        ]
+        calls(&host),
+        SYNC,
+        "the Copy holds what the create answered: nothing to get"
     );
 
     // One Field changes, the other is kept.
@@ -129,11 +127,10 @@ fn put_list_get_env_rm_a_profile() {
             "ANTHROPIC_MODEL"
         ])
     );
-    assert_eq!(
-        op_lines(&host).last().unwrap(),
-        "item edit id1 --vault optokens --format json"
-    );
+    assert_eq!(calls(&host), synced(&["ItemsGetAll", "ItemsPut"]));
+    sealed(&host, &known);
 
+    // Within the Copy's Life, list, get and env call nothing.
     let list = run(&host, &["list"]);
     assert_eq!(list.code, 0);
     assert_eq!(
@@ -167,20 +164,24 @@ fn put_list_get_env_rm_a_profile() {
         .output()
         .unwrap();
     assert_eq!(String::from_utf8(evaluated.stdout).unwrap(), "tok'en $HOME");
+    assert_eq!(
+        calls(&host),
+        Vec::<String>::new(),
+        "no Core call, no sign-in"
+    );
 
     let rm = run(&host, &["rm", "glm"]);
     assert_eq!(
         rm.json(),
         json!({ "secret": "glm/default", "changed": true })
     );
-    assert_eq!(
-        op_lines(&host).last().unwrap(),
-        "item delete id1 --vault optokens"
-    );
+    assert_eq!(calls(&host), synced(&["ItemsDeleteAll"]));
+    assert_eq!(host.items(), json!([]), "deleted, not archived");
     assert_eq!(
         run(&host, &["rm", "glm"]).json(),
         json!({ "secret": "glm/default", "changed": false })
     );
+    assert_eq!(calls(&host), SYNC);
     assert_eq!(run(&host, &["list"]).json(), json!({ "secrets": [] }));
 
     let gone = run(&host, &["get", "glm"]);
@@ -190,25 +191,91 @@ fn put_list_get_env_rm_a_profile() {
         gone.error()["error"][0]["fix"],
         "run `optokens list` to see what it has, or `optokens put` it"
     );
+    sealed(&host, &known);
+}
 
-    let calls = host.calls();
-    assert!(
-        calls
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|c| c["token_in_env"] == true),
-        "{calls}"
+/// Within its Life the Copy answers alone; past it, a Sync lists once and
+/// gets only what changed; `--fresh` syncs within it.
+#[test]
+fn the_copy_answers_within_its_life_and_a_sync_gets_only_what_changed() {
+    let item = |id: &str, service: &str, v: &str| {
+        stored(
+            id,
+            service,
+            json!(["optokens"]),
+            json!([
+                value(0, "value", v),
+                meta("service", service),
+                meta("account", "default"),
+                meta("kind", "static"),
+                meta("shape", "value")
+            ]),
+        )
+    };
+    let host = seeded(json!([item("a1", "a", "A-1"), item("b1", "b", "B-1")]));
+    let cold = run(&host, &["list"]);
+    assert_eq!(cold.json()["secrets"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        calls(&host),
+        synced(&["ItemsGetAll"]),
+        "a cold Copy gets all"
     );
+
+    for args in [&["list"][..], &["get", "a"], &["env", "a"]] {
+        run(&host, args);
+    }
+    assert_eq!(calls(&host), Vec::<String>::new(), "a warm Copy: no call");
+
+    // Past its Life, nothing changed: one list, no get.
+    let stale = host.run(&["get", "b"], &[TOKEN, STALE], None);
+    assert_eq!(stale.stdout, "B-1");
+    assert_eq!(calls(&host), SYNC);
+
+    // One item changed on another host: one list, one get of it alone.
+    host.change("a", "value", "A-2");
+    assert_eq!(run(&host, &["get", "a"]).stdout, "A-1", "within its Life");
+    let changed = host.run(&["get", "a"], &[TOKEN, STALE], None);
+    assert_eq!(changed.stdout, "A-2");
+    let got: Vec<Value> = host
+        .calls()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["ids"].clone())
+        .collect();
+    assert_eq!(calls(&host), synced(&["ItemsGetAll"]));
+    assert_eq!(got[3], json!(["a1"]));
+
+    // `--fresh` syncs within the Life.
+    host.change("b", "value", "B-2");
+    for args in [
+        &["get", "b", "--fresh"][..],
+        &["env", "b", "--fresh"],
+        &["list", "--fresh"],
+    ] {
+        let ran = run(&host, args);
+        assert_eq!(
+            ran.code,
+            2 * (args[0] == "env") as i32,
+            "{args:?}: {}",
+            ran.stdout
+        );
+    }
+    assert_eq!(
+        calls(&host),
+        [synced(&["ItemsGetAll"]), synced(&[]), synced(&[])].concat()
+    );
+    assert_eq!(run(&host, &["get", "b"]).stdout, "B-2");
+    sealed(&host, &["A-1", "A-2", "B-1", "B-2"]);
 }
 
 /// A Field's type follows the way this put set it, both ways; one it does not
 /// name keeps its own, and a stored item reads back as it was.
 #[test]
 fn a_fields_type_follows_how_its_value_came_in() {
-    let concealed = |label: &str, value: &str| {
-        let mut f = field("fields", label, value);
-        f["type"] = json!("CONCEALED");
+    let concealed = |i: usize, label: &str, v: &str| {
+        let mut f = value(i, label, v);
+        f["fieldType"] = json!("Concealed");
         f
     };
     let host = seeded(json!([stored(
@@ -216,11 +283,11 @@ fn a_fields_type_follows_how_its_value_came_in() {
         "app/default",
         json!(["optokens"]),
         json!([
-            concealed("URL", "https://a"),
-            concealed("TOKEN", "t"),
-            field("fields", "USER", "u"),
-            field("optokens", "kind", "static"),
-            field("optokens", "shape", "fields")
+            concealed(0, "URL", "https://a"),
+            concealed(1, "TOKEN", "t"),
+            value(2, "USER", "u"),
+            meta("kind", "static"),
+            meta("shape", "fields")
         ])
     )]));
     let types = || host.field_types("app");
@@ -235,7 +302,7 @@ fn a_fields_type_follows_how_its_value_came_in() {
     );
     assert_eq!(
         types(),
-        json!({ "URL": "STRING", "TOKEN": "CONCEALED", "USER": "STRING" })
+        json!({ "URL": "Text", "TOKEN": "Concealed", "USER": "Text" })
     );
     assert_eq!(
         run(&host, &["put", "app", "--set", "URL=https://a"]).json()["changed"],
@@ -250,7 +317,7 @@ fn a_fields_type_follows_how_its_value_came_in() {
     assert_eq!(piped_in.json()["changed"], true);
     assert_eq!(
         types(),
-        json!({ "URL": "CONCEALED", "TOKEN": "CONCEALED", "USER": "STRING" })
+        json!({ "URL": "Concealed", "TOKEN": "Concealed", "USER": "Text" })
     );
     assert_eq!(
         run(&host, &["get", "app", "--json"]).json()["fields"],
@@ -261,7 +328,7 @@ fn a_fields_type_follows_how_its_value_came_in() {
 
 #[test]
 fn an_account_and_a_vault_file_name_where_it_goes() {
-    let host = host();
+    let host = Host::new(&[], json!({ "core": { "vaults": ["optokens", "team"] } }));
     std::fs::create_dir_all(host.config()).unwrap();
     std::fs::write(host.config().join("vault"), "team\n").unwrap();
     let put = piped(
@@ -279,10 +346,8 @@ fn an_account_and_a_vault_file_name_where_it_goes() {
         "s3cr3t",
     );
     assert_eq!(put.json()["secret"], "aws/ci");
-    assert_eq!(
-        op_lines(&host)[1],
-        "item create --vault team --format json -"
-    );
+    assert_eq!(host.items()[0]["vaultId"], "v1", "in the vault `team`");
+    assert_eq!(host.items()[0]["title"], "aws.ci");
     assert_eq!(
         run(
             &host,
@@ -316,9 +381,9 @@ fn a_single_value_is_got_bare_and_never_exported() {
         "cloudflare/default",
         json!(["optokens"]),
         json!([
-            field("fields", "value", "cf-token"),
-            field("optokens", "kind", "static"),
-            field("optokens", "shape", "value"),
+            value(0, "value", "cf-token"),
+            meta("kind", "static"),
+            meta("shape", "value"),
         ])
     )]));
     let get = run(&host, &["get", "cloudflare"]);
@@ -356,9 +421,10 @@ fn a_single_value_is_got_bare_and_never_exported() {
 }
 
 /// The owner's promise: a secret's value is never in any process's command
-/// line, and never in a temporary file. The stand-in `op` records, on each
-/// call, its own arguments, every process's command line (`ps`), and every
-/// file under `TMPDIR`.
+/// line, and never in a file in plaintext. optokens runs no program to reach
+/// 1Password; the stand-in Core records, on each call, every process's
+/// command line (`ps`) and every file under `TMPDIR`, and the config
+/// directory holds only sealed bytes.
 #[test]
 fn a_value_is_in_no_command_line_and_no_temporary_file() {
     const MARKER: &str = "MARKER-7f3a9c-never-in-argv";
@@ -401,30 +467,23 @@ fn a_value_is_in_no_command_line_and_no_temporary_file() {
         run(&host, &["get", "db", "--field", "Salt"]).stdout,
         format!("{MARKER}-b")
     );
+    sealed(&host, &[MARKER]);
 
+    let methods = host.core_calls();
+    assert!(
+        methods.contains(&"ItemsCreateAll".to_string())
+            && methods.contains(&"ItemsPut".to_string()),
+        "{methods:?}"
+    );
     let calls = host.calls();
     let calls = calls.as_array().unwrap();
     assert!(calls.len() >= 7, "{calls:?}");
-    let verbs: Vec<String> = op_lines(&host)
-        .iter()
-        .map(|l| l.split(' ').take(2).collect::<Vec<_>>().join(" "))
-        .collect();
-    assert!(
-        verbs.contains(&"item create".to_string()) && verbs.contains(&"item edit".to_string()),
-        "{verbs:?}"
-    );
     for call in calls {
-        assert!(
-            !call["args"].to_string().contains("MARKER"),
-            "a value in op's arguments: {call}"
-        );
         let ps = call["seen"]["ps"].as_str().unwrap();
-        // ps saw the processes: this very call of the stand-in among them.
-        assert!(
-            ps.contains(&format!("op {}", call["args"][0].as_str().unwrap())),
-            "{ps}"
-        );
+        // ps saw the processes: optokens itself among them.
+        assert!(ps.contains("optokens"), "{ps}");
         assert!(!ps.contains("MARKER"), "a value in a command line: {ps}");
+        assert!(!ps.contains(TOKEN.1), "the token in a command line: {ps}");
         assert!(
             !call["seen"]["tmp"].to_string().contains("MARKER"),
             "a value in a temporary file: {call}"
@@ -444,16 +503,10 @@ fn two_pipes_are_stored_concealed_in_one_put_and_one_write() {
         put.json()["fields"],
         json!(["User", "Password", "SigningKey"])
     );
-    assert_eq!(
-        op_lines(&host),
-        [
-            "item list --vault optokens --format json",
-            "item create --vault optokens --format json -"
-        ]
-    );
+    assert_eq!(calls(&host), synced(&["ItemsCreateAll"]));
     assert_eq!(
         host.field_types("deploy-db"),
-        json!({ "User": "STRING", "Password": "CONCEALED", "SigningKey": "CONCEALED" })
+        json!({ "User": "Text", "Password": "Concealed", "SigningKey": "Concealed" })
     );
     assert_eq!(
         run(&host, &["get", "deploy-db", "--json"]).json()["fields"],
@@ -505,14 +558,14 @@ fn a_pipe_that_is_no_pipe_or_empty_is_refused_before_the_vault() {
     assert_eq!(
         host.calls(),
         Value::Null,
-        "no refusal before the vault calls op"
+        "no refusal before the vault calls the Core"
     );
     let twice = host.bash(
         r#"printf s | "$0" put db --set A=1 --field-from-stdin B --field-from-pipe A=<(printf x) --field-from-pipe B=<(printf y)"#,
         &[TOKEN],
     );
     assert_eq!(kinds(&twice.json()), ["duplicate_label", "duplicate_label"]);
-    assert!(!op_lines(&host).iter().any(|l| l.contains("create")));
+    assert!(!host.core_calls().contains(&"ItemsCreateAll".to_string()));
 }
 
 #[test]
@@ -545,7 +598,7 @@ fn put_refuses_every_fault_before_it_reaches_the_vault() {
     assert_eq!(
         host.calls(),
         Value::Null,
-        "no refusal before the vault calls op"
+        "no refusal before the vault calls the Core"
     );
     // A bare put asks for its value on the link: without a tailnet, the vault is not read.
     let link = run(&host, &["put", "cloudflare"]);
@@ -562,9 +615,9 @@ fn put_refuses_every_fault_before_it_reaches_the_vault() {
     );
     assert_eq!(kinds(&names.json()), ["not_env_name", "duplicate_label"]);
     assert_eq!(
-        op_lines(&host),
-        ["item list --vault optokens --format json"; 2],
-        "one list for the described put, one for the refused names"
+        calls(&host),
+        [SYNC, SYNC].concat(),
+        "one Sync for the described put, one for the refused names"
     );
     assert_eq!(run(&host, &["put", "p", "--set", "A=1"]).code, 0);
     let kind = run(&host, &["put", "p", "--kind", "profile", "--set", "A=1"]);
@@ -575,7 +628,7 @@ fn put_refuses_every_fault_before_it_reaches_the_vault() {
 }
 
 #[test]
-fn without_a_token_nothing_reaches_op() {
+fn without_a_token_nothing_reaches_1password() {
     let host = host();
     let put = host.run(&["put", "db", "--set", "A=1"], &[], None);
     assert_eq!(kinds(&put.json()), ["no_token"]);
@@ -588,18 +641,19 @@ fn without_a_token_nothing_reaches_op() {
 /// An item as an earlier optokens wrote it: titled `<service>/<account>`, no
 /// name in its section, its Description in its section, its notes another's.
 fn old_bark(id: &str) -> Value {
-    stored(
+    let mut item = stored(
         id,
         "bark/default",
         json!(["optokens"]),
         json!([
-            { "id": "notesPlain", "type": "STRING", "purpose": "NOTES", "label": "notesPlain", "value": "an old note" },
-            field("fields", "URL", "https://push/x"),
-            field("optokens", "kind", "static"),
-            field("optokens", "shape", "fields"),
-            field("optokens", "description", "phone push")
+            value(0, "URL", "https://push/x"),
+            meta("kind", "static"),
+            meta("shape", "fields"),
+            meta("description", "phone push")
         ]),
-    )
+    );
+    item["notes"] = json!("an old note");
+    item
 }
 
 #[test]
@@ -616,7 +670,7 @@ fn a_secret_titled_with_a_slash_is_found_by_every_command_and_put_retitles_it_in
         json!({ "secrets": [{ "service": "bark", "account": "default", "kind": "static",
                               "description": "phone push", "meta": null, "fields": ["URL"] }] })
     );
-    let items = || host.state()["op"]["items"].clone();
+    let items = || host.items();
     assert_eq!(
         items()[0]["title"],
         "bark/default",
@@ -624,15 +678,13 @@ fn a_secret_titled_with_a_slash_is_found_by_every_command_and_put_retitles_it_in
     );
 
     // A put that changes no value still rewrites the item, under its new title.
+    host.forget_calls();
     let put = run(&host, &["put", "bark", "--set", "URL=https://push/x"]);
     assert_eq!(
         put.json(),
         json!({ "secret": "bark/default", "changed": true, "kind": "static", "fields": ["URL"] })
     );
-    assert_eq!(
-        op_lines(&host).last().unwrap(),
-        "item edit o1 --vault optokens --format json"
-    );
+    assert_eq!(calls(&host).last().unwrap(), "ItemsPut");
     assert_eq!(items().as_array().unwrap().len(), 1);
     assert_eq!(items()[0]["id"], "o1");
     assert_eq!(items()[0]["title"], "bark");
@@ -645,10 +697,10 @@ fn a_secret_titled_with_a_slash_is_found_by_every_command_and_put_retitles_it_in
         .as_array()
         .unwrap()
         .iter()
-        .filter(|f| f["section"]["label"] == "optokens")
+        .filter(|f| f["sectionId"] == "optokens")
         .map(|f| {
             (
-                f["label"].as_str().unwrap().into(),
+                f["title"].as_str().unwrap().into(),
                 f["value"].as_str().unwrap().into(),
             )
         })
@@ -656,23 +708,17 @@ fn a_secret_titled_with_a_slash_is_found_by_every_command_and_put_retitles_it_in
     assert_eq!(
         meta,
         [
-            ("service", "bark"),
             ("account", "default"),
             ("kind", "static"),
+            ("service", "bark"),
             ("shape", "fields"),
         ]
-        .map(|(l, v)| (l.to_string(), v.to_string()))
+        .map(|(l, v)| (l.to_string(), v.to_string())),
+        "by id, as the Core answers them"
     );
-    let notes: Vec<Value> = items()[0]["fields"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|f| f["purpose"] == "NOTES")
-        .map(|f| f["value"].clone())
-        .collect();
     assert_eq!(
-        notes,
-        [json!("phone push")],
+        items()[0]["notes"],
+        "phone push",
         "the Description moves into the notes"
     );
     assert_eq!(
@@ -680,18 +726,20 @@ fn a_secret_titled_with_a_slash_is_found_by_every_command_and_put_retitles_it_in
         false
     );
 
-    // Both titles of one Secret are two items of it, refused; rm names both.
+    // Both titles of one Secret are two items of it, refused; `--fresh`
+    // sees the one another host added within the Copy's Life.
     let mut state = host.state();
-    state["op"]["items"]
+    state["core"]["items"]
         .as_array_mut()
         .unwrap()
         .push(old_bark("o2"));
     host.set_state(&state);
-    let two = run(&host, &["get", "bark"]);
+    assert_eq!(run(&host, &["get", "bark", "--field", "URL"]).code, 0);
+    let two = run(&host, &["get", "bark", "--fresh"]);
     assert_eq!(kinds(&two.error()), ["ambiguous"]);
     assert_eq!(
         two.error()["error"][0]["fault"],
-        "the vault has 2 items of the Secret `bark/default` tagged `optokens`: o2, o1"
+        "the vault has 2 items of the Secret `bark/default` tagged `optokens`: o1, o2"
     );
 }
 
@@ -707,7 +755,8 @@ fn a_title_two_secrets_share_holds_each_by_its_section() {
     ] {
         assert_eq!(run(&host, args).json()["changed"], true, "{value}");
     }
-    let titles: Vec<Value> = host.state()["op"]["items"]
+    let titles: Vec<Value> = host
+        .items()
         .as_array()
         .unwrap()
         .iter()
@@ -749,16 +798,16 @@ fn an_item_optokens_did_not_write_is_refused_by_name() {
             "s1",
             "github/default",
             json!(["personal"]),
-            json!([field("fields", "value", "x")])
+            json!([value(0, "value", "x")])
         ),
         stored(
             "s2",
             "bad/default",
             json!(["optokens"]),
             json!([
-                field("optokens", "kind", "parent"),
-                field("optokens", "shape", "value"),
-                field("fields", "value", "x")
+                meta("kind", "parent"),
+                meta("shape", "value"),
+                value(0, "value", "x")
             ])
         ),
     ]));
@@ -778,33 +827,41 @@ fn an_item_optokens_did_not_write_is_refused_by_name() {
         kinds(&run(&host, &["get", "bad"]).error()),
         ["not_optokens"]
     );
+    let methods = host.core_calls();
     assert!(
-        !op_lines(&host)
+        !methods
             .iter()
-            .any(|l| l.starts_with("item create") || l.starts_with("item edit"))
+            .any(|m| m == "ItemsCreateAll" || m == "ItemsPut"),
+        "{methods:?}"
     );
 }
 
 #[test]
-fn an_op_that_fails_is_refused_with_what_it_said() {
+fn a_failing_1password_call_is_refused_with_what_it_said() {
     let host = Host::new(
-        &["op"],
-        json!({ "op": { "fail": { "create": 1 }, "stderr": "[ERROR] You do not have permission" } }),
+        &[],
+        json!({ "core": { "fail": { "ItemsCreateAll": "You do not have permission" } } }),
     );
     let put = run(&host, &["put", "db", "--set", "A=1"]);
     assert_eq!(put.code, 2);
-    assert_eq!(kinds(&put.json()), ["op_failed"]);
+    assert_eq!(kinds(&put.json()), ["vault_failed"]);
     assert_eq!(
         put.json()["error"][0]["fault"],
-        "`op item create --vault optokens --format json -`: it exited 1: [ERROR] You do not have permission"
+        "1Password: You do not have permission"
     );
     assert_eq!(
         put.json()["error"][0]["fix"],
-        "run `optokens doctor`, and see that the service account can reach the vault `optokens`"
+        "run `optokens init --check`, and see that the service account can reach the vault `optokens`"
     );
-    let missing = Host::new(&[], json!({}));
-    let get = run(&missing, &["get", "db"]);
-    assert_eq!(kinds(&get.error()), ["op_failed"]);
+    let unknown = Host::new(&[], json!({ "core": { "token": "ops_another" } }));
+    let get = run(&unknown, &["get", "db"]);
+    assert_eq!((get.code, get.stdout.as_str()), (2, ""));
+    assert_eq!(kinds(&get.error()), ["vault_failed"]);
+    assert!(
+        !get.stderr.contains(TOKEN.1),
+        "the token is never in an error: {}",
+        get.stderr
+    );
 }
 
 #[test]
@@ -841,15 +898,15 @@ fn meta_is_one_json_object_put_keeps_and_get_json_and_list_show() {
         ],
     );
     assert_eq!((put.code, put.stderr.as_str()), (0, ""));
-    let item = &host.state()["op"]["items"][0];
+    let item = &host.items()[0];
     let stored: Vec<&Value> = item["fields"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|f| f["label"] == "meta")
+        .filter(|f| f["title"] == "meta")
         .collect();
     assert_eq!(stored.len(), 1, "{item}");
-    assert_eq!(stored[0]["section"]["id"], "optokens");
+    assert_eq!(stored[0]["sectionId"], "optokens");
     assert_eq!(
         stored[0]["value"], r#"{"account_id":"acc1","zone":{"id":7}}"#,
         "compact JSON"
@@ -910,15 +967,15 @@ fn meta_is_one_json_object_put_keeps_and_get_json_and_list_show() {
 /// Meta; one whose `meta` is no JSON object is not optokens' layout.
 #[test]
 fn an_item_without_meta_has_none_and_a_bad_meta_is_refused_by_name() {
-    let item = |meta: Option<&str>| {
+    let item = |m: Option<&str>| {
         let mut fields = vec![
-            field("fields", "value", "cf-token"),
-            field("optokens", "service", "cloudflare"),
-            field("optokens", "account", "default"),
-            field("optokens", "kind", "static"),
-            field("optokens", "shape", "value"),
+            value(0, "value", "cf-token"),
+            meta("service", "cloudflare"),
+            meta("account", "default"),
+            meta("kind", "static"),
+            meta("shape", "value"),
         ];
-        fields.extend(meta.map(|m| field("optokens", "meta", m)));
+        fields.extend(m.map(|m| meta("meta", m)));
         stored("x1", "cloudflare", json!(["optokens"]), json!(fields))
     };
     let host = seeded(json!([item(None)]));
@@ -953,21 +1010,21 @@ fn put_keeps_the_tags_sections_and_field_order_it_does_not_own() {
         "deploy",
         json!(["optokens", "mytokens", "mytokens-digest-abc"]),
         json!([
-            { "id": "notesPlain", "type": "STRING", "purpose": "NOTES", "label": "notesPlain", "value": "a note" },
-            field("fields", "C", "3"),
-            field("fields", "A", "1"),
-            field("fields", "B", "2"),
-            field("optokens", "service", "deploy"),
-            field("optokens", "account", "default"),
-            field("optokens", "kind", "profile"),
-            field("optokens", "shape", "fields"),
-            field("mytokens", "origin", "laptop"),
+            value(0, "C", "3"),
+            value(1, "A", "1"),
+            value(2, "B", "2"),
+            meta("service", "deploy"),
+            meta("account", "default"),
+            meta("kind", "profile"),
+            meta("shape", "fields"),
+            { "id": "mytokens.origin", "title": "origin", "sectionId": "mytokens", "fieldType": "Text", "value": "laptop" },
         ]),
     );
+    item["notes"] = json!("a note");
     item["sections"]
         .as_array_mut()
         .unwrap()
-        .push(json!({ "id": "mytokens", "label": "mytokens" }));
+        .push(json!({ "id": "mytokens", "title": "mytokens" }));
     let host = seeded(json!([item]));
     assert_eq!(
         run(&host, &["get", "deploy", "--json"]).json()["fields"],
@@ -978,7 +1035,7 @@ fn put_keeps_the_tags_sections_and_field_order_it_does_not_own() {
         let args = [&["put", "deploy"][..], &put[..]].concat();
         assert_eq!(run(&host, &args).json()["changed"], true);
     }
-    let item = &host.state()["op"]["items"][0];
+    let item = &host.items()[0];
     assert_eq!(
         item["tags"],
         json!(["optokens", "mytokens", "mytokens-digest-abc"])
@@ -987,13 +1044,12 @@ fn put_keeps_the_tags_sections_and_field_order_it_does_not_own() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|f| f["section"]["label"] != "optokens")
-        .map(|f| (f["section"]["label"].clone(), f["label"].clone()))
+        .filter(|f| f["sectionId"] != "optokens")
+        .map(|f| (f["sectionId"].clone(), f["title"].clone()))
         .collect();
     assert_eq!(
         held,
         [
-            (Value::Null, json!("notesPlain")),
             (json!("fields"), json!("C")),
             (json!("fields"), json!("A")),
             (json!("fields"), json!("B")),
@@ -1001,14 +1057,8 @@ fn put_keeps_the_tags_sections_and_field_order_it_does_not_own() {
             (json!("mytokens"), json!("origin")),
         ]
     );
-    let notes = item["fields"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|f| f["purpose"] == "NOTES");
     assert_eq!(
-        notes.unwrap()["value"],
-        "a note",
+        item["notes"], "a note",
         "the notes are the Description, kept"
     );
     assert_eq!(

@@ -1,5 +1,6 @@
-//! `put` through the one-time link, the real binary: `tailscale` and `op`
-//! replaced by the stand-in of `examples/standin.rs`. `tailscale ip` answers
+//! `put` through the one-time link, the real binary: `tailscale` replaced by
+//! the stand-in of `examples/standin.rs`, 1Password's Core by the stand-in of
+//! `src/standin.rs`. `tailscale ip` answers
 //! a loopback address, so the test reads the link from put's stderr and
 //! submits the form to it as a browser would.
 #![cfg(unix)]
@@ -19,8 +20,8 @@ fn start(host: &Host, args: &[&str], env: &[(&str, &str)]) -> Waiting {
 /// A host whose `tailscale` has the address 127.0.0.1, and `cert` as given.
 fn tailnet(cert: Value, items: Value) -> Host {
     Host::new(
-        &["op", "tailscale"],
-        json!({ "op": { "items": items },
+        &["tailscale"],
+        json!({ "core": { "items": items },
                 "tailscale": { "ip": ["127.0.0.1"], "cert_domains": [DOMAIN], "cert": cert } }),
     )
 }
@@ -38,31 +39,16 @@ fn kinds(answer: &Value) -> Vec<&str> {
         .collect()
 }
 
-/// Each `op` call's first two words.
-fn op_verbs(host: &Host) -> Vec<String> {
-    host.calls()
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|c| c["program"] == "op")
-        .map(|c| {
-            let args = c["args"].as_array().unwrap();
-            format!(
-                "{} {}",
-                args[0].as_str().unwrap(),
-                args[1].as_str().unwrap()
-            )
-        })
-        .collect()
-}
+/// What every Sync calls: a sign-in, the vault's id, one list.
+const SYNC: [&str; 3] = ["init_client", "VaultsList", "ItemsList"];
 
 fn get(host: &Host, args: &[&str]) -> Ran {
     host.run(args, &[TOKEN], None)
 }
 
-/// The owner's promise, through the link: a value submitted reaches `op`
-/// only on its stdin. It is in no command line (`ps`, as the stand-in `op`
-/// sees it on each call), no temporary file, and neither of put's outputs.
+/// The owner's promise, through the link: a value submitted reaches only
+/// the Core. It is in no command line (`ps`, as the stand-in Core sees it on
+/// each call), no file in plaintext, and neither of put's outputs.
 #[test]
 fn fields_over_plain_http_store_once_and_a_second_post_is_gone() {
     const MARKER: &str = "MARKER-5c1e-through-the-link";
@@ -99,9 +85,9 @@ fn fields_over_plain_http_store_once_and_a_second_post_is_gone() {
     assert_eq!(waiting.url, format!("http://127.0.0.1:{port}{path}"));
     assert_eq!(path.len(), 33, "{path}");
     assert_eq!(
-        op_verbs(&host),
-        ["item list"],
-        "the vault is read before the link"
+        host.core_calls(),
+        SYNC,
+        "the vault is synced before the link"
     );
 
     let (status, page) = waiting.request("GET", "");
@@ -113,9 +99,9 @@ fn fields_over_plain_http_store_once_and_a_second_post_is_gone() {
     assert!(page.contains(r#"name="f0" type="password""#), "{page}");
     assert!(page.contains(r#"name="f1" type="text""#), "{page}");
 
-    // `op` slow to store, so the link is still served when the second POST comes.
+    // 1Password slow to store, so the link is still served when the second POST comes.
     let mut state = host.state();
-    state["op"]["hang_ms"] = json!(1500);
+    state["core"]["hang_ms"] = json!(1500);
     host.set_state(&state);
     let form = format!("f0={MARKER}&f1=svc");
     let (status, sent) = waiting.request("POST", &form);
@@ -140,7 +126,7 @@ fn fields_over_plain_http_store_once_and_a_second_post_is_gone() {
         put.stderr
     );
     let mut state = host.state();
-    state["op"]["hang_ms"] = Value::Null;
+    state["core"]["hang_ms"] = Value::Null;
     host.set_state(&state);
     let stored = get(&host, &["get", "db", "--json"]);
     assert_eq!(
@@ -150,7 +136,7 @@ fn fields_over_plain_http_store_once_and_a_second_post_is_gone() {
     assert_eq!(stored.json()["description"], "CI database");
     assert_eq!(
         host.field_types("db"),
-        json!({ "Host": "STRING", "Password": "CONCEALED", "User": "STRING" }),
+        json!({ "Host": "Text", "Password": "Concealed", "User": "Text" }),
         "--set and --show are plain, a hidden input concealed"
     );
 
@@ -159,15 +145,22 @@ fn fields_over_plain_http_store_once_and_a_second_post_is_gone() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|c| c["program"] == "op")
+        .filter(|c| c["program"] == "core")
     {
-        assert!(!call["args"].to_string().contains(MARKER), "{call}");
         let ps = call["seen"]["ps"].as_str().unwrap();
-        assert!(ps.contains("op item"), "{ps}");
+        assert!(ps.contains("optokens"), "{ps}");
         assert!(!ps.contains(MARKER), "a value in a command line: {ps}");
         assert!(!call["seen"]["tmp"].to_string().contains(MARKER), "{call}");
     }
-    assert!(op_verbs(&host).contains(&"item create".to_string()));
+    assert!(host.core_calls().contains(&"ItemsCreateAll".to_string()));
+    for (path, bytes) in host.config_files() {
+        let marker = MARKER.as_bytes();
+        assert!(
+            !bytes.windows(marker.len()).any(|w| w == marker),
+            "{}",
+            path.display()
+        );
+    }
 }
 
 #[test]
@@ -196,7 +189,7 @@ fn a_bare_put_over_https_stores_one_value() {
     assert_eq!(get(&host, &["get", "cloudflare"]).stdout, "cf+token");
     assert_eq!(
         host.field_types("cloudflare"),
-        json!({ "value": "CONCEALED" })
+        json!({ "value": "Concealed" })
     );
     let cert = host
         .calls()
@@ -262,12 +255,12 @@ fn a_link_not_submitted_in_time_stores_nothing() {
         put.json()["error"][0]["fix"],
         "run the same `optokens put` again, and open its new link sooner"
     );
-    assert_eq!(op_verbs(&host), ["item list"]);
+    assert_eq!(host.core_calls(), SYNC);
 }
 
 #[test]
 fn without_a_tailnet_nothing_is_stored_and_the_vault_is_not_read() {
-    let missing = Host::new(&["op"], json!({}));
+    let missing = Host::new(&[], json!({}));
     let put = get(&missing, &["put", "db", "--fields", "Password"]);
     assert_eq!(put.code, 2);
     assert_eq!(kinds(&put.json()), ["tailscale_missing"]);
@@ -277,14 +270,14 @@ fn without_a_tailnet_nothing_is_stored_and_the_vault_is_not_read() {
     );
     assert_eq!(missing.calls(), Value::Null);
 
-    let down = Host::new(&["op", "tailscale"], json!({ "tailscale": { "ip": [] } }));
+    let down = Host::new(&["tailscale"], json!({ "tailscale": { "ip": [] } }));
     let bare = get(&down, &["put", "db"]);
     assert_eq!(kinds(&bare.json()), ["no_tailnet_address"]);
     assert_eq!(bare.json()["error"][0]["fix"], "run `tailscale up`");
 
     // An address of the tailnet that is on no interface of this host.
     let elsewhere = Host::new(
-        &["op", "tailscale"],
+        &["tailscale"],
         json!({ "tailscale": { "ip": ["192.0.2.7"] } }),
     );
     let put = get(&elsewhere, &["put", "db", "--fields", "Password"]);
@@ -294,13 +287,13 @@ fn without_a_tailnet_nothing_is_stored_and_the_vault_is_not_read() {
         "no one-time link can be served, so nothing is stored: the tailnet address 192.0.2.7 is on no interface of this host"
     );
     for host in [&down, &elsewhere] {
-        assert!(op_verbs(host).is_empty(), "{}", host.calls());
+        assert!(host.core_calls().is_empty(), "{}", host.calls());
     }
 }
 
 #[test]
 fn every_fault_of_the_command_line_is_refused_before_the_link() {
-    let host = Host::new(&["op"], json!({}));
+    let host = Host::new(&[], json!({}));
     let put = get(
         &host,
         &["put", "a/b", "--show", "User", "--set", "NOEQUALS"],

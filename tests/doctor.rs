@@ -1,5 +1,6 @@
-//! `optokens doctor`, the real binary, with `op` and `tailscale` replaced by
-//! the stand-in of `examples/standin.rs` placed first on `PATH`.
+//! `optokens doctor`, the real binary, with `tailscale` replaced by the
+//! stand-in of `examples/standin.rs` placed first on `PATH`, and no `op`:
+//! optokens needs none.
 #![cfg(unix)]
 
 mod common;
@@ -11,7 +12,6 @@ use std::time::{Duration, Instant};
 
 fn healthy() -> Value {
     json!({
-        "op": { "version": "2.30.0" },
         "tailscale": { "ip": ["100.64.0.7", "fd7a:115c:a1e0::7"], "cert_domains": ["build.tail1234.ts.net"] },
     })
 }
@@ -27,7 +27,7 @@ fn kinds(answer: &Value) -> Vec<&str> {
 
 #[test]
 fn a_healthy_host_has_no_findings_and_no_program_is_given_the_token() {
-    let host = Host::new(&["op", "tailscale"], healthy());
+    let host = Host::new(&["tailscale"], healthy());
     let (code, answer) = host.doctor(&[("OP_SERVICE_ACCOUNT_TOKEN", "ops_from_env")]);
     assert_eq!(code, 0);
     assert_eq!(answer["findings"], json!([]), "{answer}");
@@ -35,7 +35,7 @@ fn a_healthy_host_has_no_findings_and_no_program_is_given_the_token() {
     assert_eq!(
         answer["found"],
         json!({
-            "op": { "path": bin.join("op"), "version": "2.30.0" },
+
             "token": { "from": "env", "at": "OP_SERVICE_ACCOUNT_TOKEN" },
             "vault": { "name": "optokens", "file": null },
             "tailscale": { "path": bin.join("tailscale"), "address": "100.64.0.7" },
@@ -54,7 +54,6 @@ fn a_healthy_host_has_no_findings_and_no_program_is_given_the_token() {
     assert_eq!(
         args,
         [
-            (json!("op"), json!(["--version"])),
             (json!("tailscale"), json!(["ip"])),
             (json!("tailscale"), json!(["status", "--json"])),
         ]
@@ -71,7 +70,7 @@ fn a_healthy_host_has_no_findings_and_no_program_is_given_the_token() {
 
 #[test]
 fn a_token_file_at_0644_is_refused_with_its_chmod_and_left_as_it_is() {
-    let host = Host::new(&["op", "tailscale"], healthy());
+    let host = Host::new(&["tailscale"], healthy());
     let file = host.token_file(0o644);
     let (code, answer) = host.doctor(&[]);
     assert_eq!(code, 0);
@@ -94,7 +93,7 @@ fn a_token_file_at_0644_is_refused_with_its_chmod_and_left_as_it_is() {
 
 #[test]
 fn a_token_file_that_cannot_be_opened_is_unreadable_not_missing() {
-    let host = Host::new(&["op", "tailscale"], healthy());
+    let host = Host::new(&["tailscale"], healthy());
     let file = host.token_file(0o000);
     let (_, answer) = host.doctor(&[]);
     assert_eq!(kinds(&answer), ["unreadable"], "{answer}");
@@ -110,7 +109,7 @@ fn a_token_file_that_cannot_be_opened_is_unreadable_not_missing() {
 
 #[test]
 fn a_token_file_at_0600_is_found_and_the_vault_file_names_the_vault() {
-    let host = Host::new(&["op", "tailscale"], healthy());
+    let host = Host::new(&["tailscale"], healthy());
     let file = host.token_file(0o600);
     std::fs::write(host.config().join("vault"), "team\n").unwrap();
     let (_, answer) = host.doctor(&[]);
@@ -127,7 +126,7 @@ fn a_token_file_at_0600_is_found_and_the_vault_file_names_the_vault() {
 
 #[test]
 fn xdg_config_home_holds_the_token_file_when_set() {
-    let host = Host::new(&["op", "tailscale"], healthy());
+    let host = Host::new(&["tailscale"], healthy());
     let xdg = host.dir.path().join("xdg");
     std::fs::create_dir_all(xdg.join("optokens")).unwrap();
     let file = xdg.join("optokens/token");
@@ -147,12 +146,12 @@ fn a_bare_host_names_each_fix() {
     assert_eq!(code, 0);
     assert_eq!(
         kinds(&answer),
-        ["op_missing", "no_token", "tailscale_missing"],
+        ["no_token", "tailscale_missing"],
         "{answer}"
     );
     let token = host.config().join("token");
     assert_eq!(
-        answer["findings"][1]["fix"],
+        answer["findings"][0]["fix"],
         format!(
             "set OP_SERVICE_ACCOUNT_TOKEN to the service account's token, or write it alone into {} and run `chmod 600 {}`",
             token.display(),
@@ -160,19 +159,13 @@ fn a_bare_host_names_each_fix() {
         )
     );
     assert_eq!(answer["next"], answer["findings"][0]["fix"]);
-    assert!(
-        answer["next"]
-            .as_str()
-            .unwrap()
-            .contains("brew install 1password-cli")
-    );
 }
 
 #[test]
-fn an_op_that_hangs_is_cut_off_at_the_bound() {
+fn a_tailscale_that_hangs_is_cut_off_at_the_bound() {
     let mut state = healthy();
-    state["op"]["hang_ms"] = json!(20_000);
-    let host = Host::new(&["op", "tailscale"], state);
+    state["tailscale"]["hang_ms"] = json!(20_000);
+    let host = Host::new(&["tailscale"], state);
     let start = Instant::now();
     let (_, answer) = host.doctor(&[("OP_SERVICE_ACCOUNT_TOKEN", "x")]);
     assert!(
@@ -180,7 +173,11 @@ fn an_op_that_hangs_is_cut_off_at_the_bound() {
         "{:?}",
         start.elapsed()
     );
-    assert_eq!(kinds(&answer), ["op_unanswered"], "{answer}");
+    assert_eq!(
+        kinds(&answer),
+        ["no_tailnet_address", "no_cert"],
+        "{answer}"
+    );
     assert!(
         answer["findings"][0]["fault"]
             .as_str()
@@ -193,8 +190,8 @@ fn an_op_that_hangs_is_cut_off_at_the_bound() {
 #[test]
 fn a_host_off_its_tailnet_and_without_certs_says_so() {
     let host = Host::new(
-        &["op", "tailscale"],
-        json!({ "op": {}, "tailscale": { "exit": 1, "stderr": "Tailscale is stopped." } }),
+        &["tailscale"],
+        json!({ "tailscale": { "exit": 1, "stderr": "Tailscale is stopped." } }),
     );
     let (_, answer) = host.doctor(&[("OP_SERVICE_ACCOUNT_TOKEN", "x")]);
     assert_eq!(
@@ -208,8 +205,8 @@ fn a_host_off_its_tailnet_and_without_certs_says_so() {
         "`tailscale ip`: it exited 1: Tailscale is stopped."
     );
     let host = Host::new(
-        &["op", "tailscale"],
-        json!({ "op": {}, "tailscale": { "ip": ["100.64.0.7"], "cert_domains": [] } }),
+        &["tailscale"],
+        json!({ "tailscale": { "ip": ["100.64.0.7"], "cert_domains": [] } }),
     );
     let (_, answer) = host.doctor(&[("OP_SERVICE_ACCOUNT_TOKEN", "x")]);
     assert_eq!(kinds(&answer), ["no_cert"], "{answer}");

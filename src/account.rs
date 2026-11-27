@@ -7,7 +7,8 @@ use crate::refusal::{Refusal, quoted};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-pub use crate::op::TOKEN_ENV;
+/// The environment variable that holds the service account's token, as `op` reads it.
+pub const TOKEN_ENV: &str = "OP_SERVICE_ACCOUNT_TOKEN";
 /// The vault when no vault file names one.
 pub const DEFAULT_VAULT: &str = "optokens";
 /// The token file and the vault file, in the config directory.
@@ -108,7 +109,7 @@ pub struct Token {
 }
 
 impl Token {
-    /// The value, for the one place that hands it to `op`'s environment.
+    /// The value, for the one place that hands it to opcore (`Store::new`).
     pub fn value(&self) -> &str {
         &self.value
     }

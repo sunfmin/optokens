@@ -1,6 +1,6 @@
 //! `init`, the real binary: the token through the one-time link, the files it
-//! writes, and its checks of the vault against the stand-in `op`, whose
-//! `op.token` makes it refuse any other token.
+//! writes, and its checks of the vault against the stand-in Core, whose
+//! `core.token` makes it refuse any other token.
 #![cfg(unix)]
 
 mod common;
@@ -11,19 +11,22 @@ use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-/// The token a person enters: it must reach `op`'s environment and the token
-/// file, and nothing else.
+/// The token a person enters: it must reach the Core and the token file, and
+/// nothing else.
 const TOKEN: &str = "ops_MARKER-9d2e-the-new-token";
 
-/// A host on the tailnet (127.0.0.1, no certificate) whose `op` takes
-/// [`TOKEN`] alone, its state's `op` merged with `op`.
-fn host(op: Value) -> Host {
-    let mut state = json!({ "op": { "token": TOKEN },
+/// What every Sync calls: a sign-in, the vault's id, one list.
+const SYNC: [&str; 3] = ["init_client", "VaultsList", "ItemsList"];
+
+/// A host on the tailnet (127.0.0.1, no certificate) whose Core takes
+/// [`TOKEN`] alone, its state's `core` merged with `core`.
+fn host(core: Value) -> Host {
+    let mut state = json!({ "core": { "token": TOKEN },
         "tailscale": { "ip": ["127.0.0.1"], "cert": { "error": "Access denied" } } });
-    for (k, v) in op.as_object().unwrap() {
-        state["op"][k] = v.clone();
+    for (k, v) in core.as_object().unwrap() {
+        state["core"][k] = v.clone();
     }
-    Host::new(&["op", "tailscale"], state)
+    Host::new(&["tailscale"], state)
 }
 
 /// `init args`, its link submitted with [`TOKEN`]: how it ended, its stderr
@@ -53,20 +56,9 @@ fn kinds(answer: &Value) -> Vec<&str> {
         .collect()
 }
 
-/// Each `op` call's first two words.
-fn op_verbs(host: &Host) -> Vec<String> {
-    let calls = host.calls();
-    let calls = calls.as_array().into_iter().flatten();
-    calls
-        .filter(|c| c["program"] == "op")
-        .map(|c| {
-            format!(
-                "{} {}",
-                c["args"][0].as_str().unwrap(),
-                c["args"][1].as_str().unwrap()
-            )
-        })
-        .collect()
+/// `SYNC` and then `more`.
+fn synced(more: &[&str]) -> Vec<String> {
+    SYNC.iter().chain(more).map(|c| c.to_string()).collect()
 }
 
 /// The config directory's files, by name.
@@ -80,7 +72,7 @@ fn files(host: &Host) -> Vec<String> {
 }
 
 #[test]
-fn the_token_is_written_owner_only_and_checked_with_op_and_a_second_run_is_the_same() {
+fn the_token_is_written_owner_only_and_checked_through_the_copy_and_a_second_run_is_the_same() {
     let host = host(json!({}));
     // An older, open token file and directory, which init replaces.
     let old = host.token_file(0o644);
@@ -116,36 +108,17 @@ fn the_token_is_written_owner_only_and_checked_with_op_and_a_second_run_is_the_s
         std::fs::read_to_string(config.join("vault")).unwrap(),
         "optokens\n"
     );
-    assert_eq!(files(&host), ["token", "vault"], "no file left beside them");
     assert_eq!(
-        op_verbs(&host),
-        [
-            "vault list",
-            "item list",
-            "item create",
-            "item list",
-            "item get",
-            "item delete"
-        ]
+        files(&host),
+        ["copy", "token", "vault"],
+        "no file left beside them but the sealed Copy"
     );
     assert_eq!(
-        host.state()["op"]["items"],
-        json!([]),
-        "the probe is removed"
+        host.core_calls(),
+        synced(&["ItemsCreateAll", "ItemsDeleteAll"]),
+        "one Sync, one create, the read from the Copy, one delete"
     );
-    let probe = host
-        .calls()
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|c| c["args"][1] == "create")
-        .cloned();
-    assert_eq!(
-        probe.unwrap()["args"],
-        json!([
-            "item", "create", "--vault", "optokens", "--format", "json", "-"
-        ])
-    );
+    assert_eq!(host.items(), json!([]), "the probe is removed");
 
     // The token is in no output, no command line, no temporary file.
     assert!(
@@ -155,10 +128,9 @@ fn the_token_is_written_owner_only_and_checked_with_op_and_a_second_run_is_the_s
     );
     for call in host.calls().as_array().unwrap() {
         assert!(!call["args"].to_string().contains("MARKER"), "{call}");
-        if call["program"] == "op" {
-            assert_eq!(call["token_in_env"], true, "{call}");
+        if call["program"] == "core" {
             let ps = call["seen"]["ps"].as_str().unwrap();
-            assert!(ps.contains("op ") && !ps.contains("MARKER"), "{ps}");
+            assert!(ps.contains("optokens") && !ps.contains("MARKER"), "{ps}");
             assert!(
                 !call["seen"]["tmp"].to_string().contains("MARKER"),
                 "{call}"
@@ -175,7 +147,16 @@ fn the_token_is_written_owner_only_and_checked_with_op_and_a_second_run_is_the_s
     let again = init(&host, &[], &env);
     assert_eq!(again.code, 0, "{}", again.stdout);
     assert_eq!(again.json(), ran.json());
-    assert_eq!(files(&host), ["token", "vault"]);
+    assert_eq!(files(&host), ["copy", "token", "vault"]);
+    for (path, bytes) in host.config_files() {
+        if !path.ends_with("token") {
+            assert!(
+                !bytes.windows(6).any(|w| w == b"MARKER"),
+                "{}",
+                path.display()
+            );
+        }
+    }
     assert_eq!((mode(&config), mode(&token_file)), (0o700, 0o600));
     assert_eq!(
         std::fs::read_to_string(&token_file).unwrap(),
@@ -197,7 +178,7 @@ fn a_vault_the_service_account_cannot_see_is_refused_and_the_token_kept_for_chec
     assert_eq!(
         fault,
         format!(
-            "check `vault_listed`: `op vault list` does not show the vault `team`: it does not exist, or the service account has no access to it; the token file `{}` and the vault file are written and kept, so once it is fixed `optokens init --check` checks again with no new link",
+            "check `vault_listed`: 1Password lists no vault `team` to the service account: it does not exist, or the service account has no access to it; the token file `{}` and the vault file are written and kept, so once it is fixed `optokens init --check` checks again with no new link",
             token_file.display()
         )
     );
@@ -205,7 +186,7 @@ fn a_vault_the_service_account_cannot_see_is_refused_and_the_token_kept_for_chec
         ran.json()["error"][0]["fix"],
         "in 1Password's web UI, under Developer → Service Accounts, give the service account read and write on the vault `team` (create the vault first if it is not there), then run `optokens init --check`"
     );
-    assert_eq!(op_verbs(&host), ["vault list"]);
+    assert_eq!(host.core_calls(), ["init_client", "VaultsList"]);
     assert_eq!(mode(&token_file), 0o600);
     assert_eq!(
         std::fs::read_to_string(host.config().join("vault")).unwrap(),
@@ -214,7 +195,7 @@ fn a_vault_the_service_account_cannot_see_is_refused_and_the_token_kept_for_chec
 
     // The grant given: `--check` alone, with the files init kept, no link.
     let mut state = host.state();
-    state["op"]["vaults"] = json!(["Private", "team"]);
+    state["core"]["vaults"] = json!(["Private", "team"]);
     state["calls"] = Value::Null;
     host.set_state(&state);
     let check = host.run(&["init", "--check"], &[], None);
@@ -227,7 +208,7 @@ fn a_vault_the_service_account_cannot_see_is_refused_and_the_token_kept_for_chec
             .as_array()
             .unwrap()
             .iter()
-            .all(|c| c["program"] == "op"),
+            .all(|c| c["program"] == "core"),
         "no `tailscale`, so no second link: {calls}"
     );
 }
@@ -235,7 +216,7 @@ fn a_vault_the_service_account_cannot_see_is_refused_and_the_token_kept_for_chec
 #[test]
 fn no_write_grant_is_refused_at_the_probe_and_a_probe_left_behind_is_written_over() {
     let host = host(
-        json!({ "fail": { "create": 1 }, "stderr": "[ERROR] You do not have permission to perform this action" }),
+        json!({ "fail": { "ItemsCreateAll": "You do not have permission to perform this action" } }),
     );
     let ran = init(&host, &[], &[]);
     assert_eq!(ran.code, 2);
@@ -245,14 +226,14 @@ fn no_write_grant_is_refused_at_the_probe_and_a_probe_left_behind_is_written_ove
         .unwrap()
         .to_string();
     assert!(
-        fault.starts_with("check `probe_written`: `op item create --vault optokens --format json -`: it exited 1: [ERROR] You do not have permission"),
+        fault.starts_with("check `probe_written`: 1Password: You do not have permission"),
         "{fault}"
     );
-    assert_eq!(op_verbs(&host), ["vault list", "item list", "item create"]);
+    assert_eq!(host.core_calls(), synced(&["ItemsCreateAll"]));
 
     // Written, but not removed: the probe stays, and the next check writes over it.
     let mut state = host.state();
-    state["op"]["fail"] = json!({ "delete": 1 });
+    state["core"]["fail"] = json!({ "ItemsDeleteAll": "You do not have permission" });
     host.set_state(&state);
     let left = host.run(
         &["init", "--check"],
@@ -260,9 +241,9 @@ fn no_write_grant_is_refused_at_the_probe_and_a_probe_left_behind_is_written_ove
         None,
     );
     assert_eq!(kinds(&left.json()), ["probe_removed"]);
-    assert_eq!(host.state()["op"]["items"].as_array().unwrap().len(), 1);
+    assert_eq!(host.items().as_array().unwrap().len(), 1);
     state = host.state();
-    state["op"]["fail"] = Value::Null;
+    state["core"]["fail"] = Value::Null;
     state["calls"] = Value::Null;
     host.set_state(&state);
     let check = host.run(
@@ -276,18 +257,11 @@ fn no_write_grant_is_refused_at_the_probe_and_a_probe_left_behind_is_written_ove
         json!({ "from": "env", "at": "OP_SERVICE_ACCOUNT_TOKEN" })
     );
     assert_eq!(
-        op_verbs(&host),
-        [
-            "vault list",
-            "item list",
-            "item get",
-            "item edit",
-            "item list",
-            "item get",
-            "item delete"
-        ]
+        host.core_calls(),
+        synced(&["ItemsGetAll", "ItemsPut", "ItemsDeleteAll"]),
+        "the probe left behind is edited, its version got by the edit"
     );
-    assert_eq!(host.state()["op"]["items"], json!([]));
+    assert_eq!(host.items(), json!([]));
 }
 
 #[test]
@@ -310,9 +284,9 @@ fn nothing_is_written_before_a_submission_nor_when_init_is_refused() {
         "run the same `optokens init` again, and open its new link sooner"
     );
     assert!(!host.config().exists());
-    assert!(op_verbs(&host).is_empty());
+    assert!(host.core_calls().is_empty());
 
-    let bare = Host::new(&["op"], json!({}));
+    let bare = Host::new(&[], json!({}));
     let refused = bare.run(&["init", "--vault", " "], &[], None);
     assert_eq!(refused.code, 2);
     assert_eq!(kinds(&refused.json()), ["-", "tailscale_missing"]);
@@ -356,19 +330,19 @@ fn a_token_file_that_cannot_be_written_is_refused_and_leaves_nothing_beside_it()
         )
     );
     assert_eq!(files(&host), ["token"], "the fresh file is removed");
-    assert!(op_verbs(&host).is_empty());
+    assert!(host.core_calls().is_empty());
 }
 
 #[test]
-fn a_probe_that_does_not_read_back_is_refused() {
-    let host = host(json!({ "lose_writes": true }));
+fn a_probe_that_1password_answers_otherwise_is_refused() {
+    let host = host(json!({ "garble_writes": true }));
     let ran = init(&host, &[], &[]);
     assert_eq!(kinds(&ran.json()), ["probe_read_back"]);
     assert!(
         ran.json()["error"][0]["fault"]
             .as_str()
             .unwrap()
-            .starts_with("check `probe_read_back`: the probe item read back is not what was written; the token file"),
+            .starts_with("check `probe_read_back`: the probe item 1Password answered is not what was written; the token file"),
         "{}",
         ran.stdout
     );

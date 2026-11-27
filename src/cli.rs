@@ -23,13 +23,13 @@ pub(crate) const EXIT_ERROR: i32 = 2;
 ///
 /// ## What it needs
 ///
-/// - The 1Password CLI, `op`, on `PATH`: optokens reaches 1Password only through it.
 /// - A 1Password service account's token, with access to the vault: see [the token and the vault](help:account).
 /// - For a one-time link, `tailscale` with a tailnet address: the link is served on the tailnet only.
 ///
 /// ## Rules to know first
 ///
-/// - A secret's value is never in any process's command line (`ps` does not show it) and never in a temporary file: it travels only over pipes and in a child's environment.
+/// - A secret's value is never in any process's command line (`ps` does not show it) and never in a file in plaintext: optokens runs no program to reach 1Password (it runs 1Password's own SDK Core inside itself), and its Copy of the vault is sealed.
+/// - `get`, `env` and `list` answer from the Copy, the sealed copy of the vault's Secrets in the config directory, with no network within {const:LIFE_MINUTES} minutes of its last Sync. Give `--fresh` right after a Secret was changed on another host. `put` and `rm` always sync first.
 /// - A command that takes a value a person knows waits for it to be submitted on a one-time link, which it prints first: it does not answer until the person submits it, or the link expires. Every other command asks nothing.
 ///
 /// ## Output
@@ -52,7 +52,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Says whether this host can run optokens: `op`, the service account's token and vault, and `tailscale` for one-time links, each finding with its fix.
+    /// Says whether this host can run optokens: the service account's token and vault, and `tailscale` for one-time links, each finding with its fix.
     ///
     /// ## When to run it
     ///
@@ -60,11 +60,11 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It finds `op` and `tailscale` on `PATH` and runs `op --version`, `tailscale ip` and `tailscale status --json`, none of them with the token in its environment. It finds the token and the vault as every command does ([the token and the vault](help:account)), reading the token file's mode or access list but never printing the token. It writes nothing, and runs no `tailscale cert`, which would write a certificate.
+    /// It finds `tailscale` on `PATH` and runs `tailscale ip` and `tailscale status --json`, without the token in their environment. It finds the token and the vault as every command does ([the token and the vault](help:account)), reading the token file's mode or access list but never printing the token. It writes nothing, and runs no `tailscale cert`, which would write a certificate.
     ///
     /// ## What it answers
     ///
-    /// - `found`: what it found, each `null` where it found nothing: `op` (`path`, `version`), `token` (`from`, `env` or `file`, and `at`, the variable or the file), `vault` (`name`, and `file`, the vault file, `null` for the default), `tailscale` (`path`, `address`, the first of `tailscale ip`), `cert` (`domains`, the names `tailscale cert` can get a certificate for).
+    /// - `found`: what it found, each `null` where it found nothing: `token` (`from`, `env` or `file`, and `at`, the variable or the file), `vault` (`name`, and `file`, the vault file, `null` for the default), `tailscale` (`path`, `address`, the first of `tailscale ip`), `cert` (`domains`, the names `tailscale cert` can get a certificate for).
     /// - `findings`: each one off, in this order, with `kind`, `fault` (what was found, and where) and `fix` (what to do). Empty when nothing is off.
     /// - `next`: the first finding's fix, or that there is nothing to fix.
     ///
@@ -73,7 +73,6 @@ enum Cmd {
     /// ```json
     /// {
     ///   "found": {
-    ///     "op": { "path": "/usr/local/bin/op", "version": "2.30.0" },
     ///     "token": null,
     ///     "vault": { "name": "optokens", "file": null },
     ///     "tailscale": { "path": "/usr/bin/tailscale", "address": "100.64.0.7" },
@@ -108,7 +107,7 @@ enum Cmd {
     ///
     /// ## When to run it
     ///
-    /// Once on a new host, after `optokens doctor` finds `op` and `tailscale`, and again to replace the token or change the vault. `init --check` alone, after a check failed and its grant was fixed, or to see that the stored token still reaches the vault.
+    /// Once on a new host, after `optokens doctor` finds `tailscale`, and again to replace the token or change the vault. `init --check` alone, after a check failed and its grant was fixed, or to see that the stored token still reaches the vault.
     ///
     /// ## The one-time link
     ///
@@ -124,7 +123,7 @@ enum Cmd {
     ///
     /// ## What it checks
     ///
-    /// With the new token, in `op`'s environment only, each in this order until one fails:
+    /// With the new token, each in this order until one fails: one Sync of the Copy, one create, a read from the Copy, one delete.
     ///
     /// {table:init}
     ///
@@ -166,7 +165,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads the Secret from the vault, merges into it what this `put` names, and writes it back as one item, only when that changes it. A Field not named is kept. `--set "NAME=value"` sets a Field that is not secret, split on the first `=`, stored as plain text; repeat it. `--field-from-stdin <Label>` sets one Field to all of stdin, one trailing newline dropped, stored concealed: for a secret a command makes and pipes in, such as `openssl rand -base64 32 | optokens put deploy-db --set "Username=svc" --field-from-stdin Password`. `--field-from-pipe <Label>=<(command)` sets a Field to all the command prints, one trailing newline dropped, stored concealed; repeat it to store several generated secrets in one `put`, such as `optokens put deploy-db --set "Username=svc" --field-from-pipe Password=<(openssl rand -base64 32) --field-from-pipe SigningKey=<(openssl rand -hex 32)`. The shell (bash, zsh) runs each command and puts only its pipe's path, `/dev/fd/N`, on the command line; `put` reads each pipe to its end and refuses any path that is not a pipe, a file among them. On Windows, PowerShell has no `<(command)`: the path must be a named pipe, `\\.\pipe\<name>`, or use one `put --field-from-stdin` per value. `--description` replaces the description, the item's notes (`--description ""` clears it); alone, for a stored Secret, it changes nothing else. `--meta '<json>'` replaces the Secret's Meta, structured data about it for a program to read (a Cloudflare `account_id`), one JSON object; a `put` without it keeps the stored one, and alone, for a stored Secret, it changes nothing else. Anything but one JSON object is refused (`bad_meta`). A new Secret is `static` unless `--kind profile`. A Profile's labels are environment variables' names, for `env`. How a Secret is laid out in the vault: [Secrets in the vault](help:secrets).
+    /// It syncs the Copy with the vault first, so it never writes over a stale item, reads the Secret from it, merges into it what this `put` names, and writes it back as one item, only when that changes it: one write, whose answer the Copy keeps. A Field not named is kept. `--set "NAME=value"` sets a Field that is not secret, split on the first `=`, stored as plain text; repeat it. `--field-from-stdin <Label>` sets one Field to all of stdin, one trailing newline dropped, stored concealed: for a secret a command makes and pipes in, such as `openssl rand -base64 32 | optokens put deploy-db --set "Username=svc" --field-from-stdin Password`. `--field-from-pipe <Label>=<(command)` sets a Field to all the command prints, one trailing newline dropped, stored concealed; repeat it to store several generated secrets in one `put`, such as `optokens put deploy-db --set "Username=svc" --field-from-pipe Password=<(openssl rand -base64 32) --field-from-pipe SigningKey=<(openssl rand -hex 32)`. The shell (bash, zsh) runs each command and puts only its pipe's path, `/dev/fd/N`, on the command line; `put` reads each pipe to its end and refuses any path that is not a pipe, a file among them. On Windows, PowerShell has no `<(command)`: the path must be a named pipe, `\\.\pipe\<name>`, or use one `put --field-from-stdin` per value. `--description` replaces the description, the item's notes (`--description ""` clears it); alone, for a stored Secret, it changes nothing else. `--meta '<json>'` replaces the Secret's Meta, structured data about it for a program to read (a Cloudflare `account_id`), one JSON object; a `put` without it keeps the stored one, and alone, for a stored Secret, it changes nothing else. Anything but one JSON object is refused (`bad_meta`). A new Secret is `static` unless `--kind profile`. A Profile's labels are environment variables' names, for `env`. How a Secret is laid out in the vault: [Secrets in the vault](help:secrets).
     ///
     /// ## The one-time link
     ///
@@ -178,7 +177,7 @@ enum Cmd {
     /// - **What it prints**: on stderr, while it waits, `optokens: open this link to enter the secret for <service> / <account> (it works once, within {const:LINK_MINUTES} minutes):` and the URL on the next line. Hand that URL to the person: delivering it is not optokens' job. Stdout keeps only the final JSON answer.
     /// - **The page**: the Secret, its description, a password input per Field asked (a plain text input for each `--show` label), and each stored Field this `put` keeps as "already set", never its value. A second submission, or one after expiry, answers 410.
     ///
-    /// A value submitted goes from the page straight into `op`'s stdin, never to optokens' stdout or stderr, a log, a command line or a file. After the submission, or at expiry, `put` stops serving and answers.
+    /// A value submitted goes from the page straight into the item 1Password stores, never to optokens' stdout or stderr, a log, a command line or a file. After the submission, or at expiry, `put` stops serving and answers.
     ///
     /// ## What it answers
     ///
@@ -193,7 +192,7 @@ enum Cmd {
     ///
     /// ## What it may refuse
     ///
-    /// Every fault it finds, before it serves a link or writes anything: `bad_name`, `bad_set`, `bad_meta`, `bad_show`, `duplicate_label`, `not_env_name`, `kind_change`, `shape_change`, `stdin_terminal`, `stdin_empty`, `stdin_not_text`, `not_a_pipe`, `pipe_empty`, `pipe_not_text`, the service account's faults ([the token and the vault](help:account)), and the vault's (`not_optokens`, `ambiguous`, `op_failed`); then `link_expired`, when no one submitted the link in time. Each is in [Secrets in the vault](help:secrets), with its fix. Without a tailnet to serve the link on, `tailscale_missing` or `no_tailnet_address`, as `optokens doctor --help` lists them, and a fault naming a tailnet address that is on no interface of this host.
+    /// Every fault it finds, before it serves a link or writes anything: `bad_name`, `bad_set`, `bad_meta`, `bad_show`, `duplicate_label`, `not_env_name`, `kind_change`, `shape_change`, `stdin_terminal`, `stdin_empty`, `stdin_not_text`, `not_a_pipe`, `pipe_empty`, `pipe_not_text`, the service account's faults ([the token and the vault](help:account)), and the vault's (`not_optokens`, `ambiguous`, `vault_failed`); then `link_expired`, when no one submitted the link in time. Each is in [Secrets in the vault](help:secrets), with its fix. Without a tailnet to serve the link on, `tailscale_missing` or `no_tailnet_address`, as `optokens doctor --help` lists them, and a fault naming a tailnet address that is on no interface of this host.
     ///
     /// ## What trips you up
     ///
@@ -212,7 +211,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads the Secret from the vault and writes nothing.
+    /// It reads the Secret from the Copy, with no network within {const:LIFE_MINUTES} minutes of its last Sync, and writes nothing but the Copy. Past that, or with `--fresh`, it syncs first: give `--fresh` right after the Secret was changed on another host.
     ///
     /// ## What it answers
     ///
@@ -224,7 +223,7 @@ enum Cmd {
     ///
     /// ## What it may refuse
     ///
-    /// `bad_name`, `not_found`, `no_such_field`, the service account's faults ([the token and the vault](help:account)), and the vault's (`not_optokens`, `ambiguous`, `op_failed`), in [Secrets in the vault](help:secrets). Its error object goes to stderr, stdout left empty.
+    /// `bad_name`, `not_found`, `no_such_field`, the service account's faults ([the token and the vault](help:account)), and the vault's (`not_optokens`, `ambiguous`, `vault_failed`), in [Secrets in the vault](help:secrets). Its error object goes to stderr, stdout left empty.
     ///
     /// ## What trips you up
     ///
@@ -248,6 +247,9 @@ enum Cmd {
         /// The whole Secret as one JSON object.
         #[arg(long, verbatim_doc_comment)]
         json: bool,
+        /// Syncs with the vault first: right after the Secret was changed on another host.
+        #[arg(long, verbatim_doc_comment)]
+        fresh: bool,
     },
     /// Prints a Profile's Fields as `export NAME='value'` lines, for `(eval "$(optokens env <project>)"; <command>)`.
     ///
@@ -257,7 +259,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads the Secret from the vault and writes nothing.
+    /// It reads the Secret from the Copy, with no network within {const:LIFE_MINUTES} minutes of its last Sync, and writes nothing but the Copy. Past that, or with `--fresh`, it syncs first: give `--fresh` right after the Secret was changed on another host.
     ///
     /// ## What it answers
     ///
@@ -270,7 +272,7 @@ enum Cmd {
     ///
     /// ## What it may refuse
     ///
-    /// `bad_name`, `not_found`, `not_env` (a single value, or a label that is not a variable's name), the service account's faults ([the token and the vault](help:account)), and the vault's (`not_optokens`, `ambiguous`, `op_failed`), in [Secrets in the vault](help:secrets). Its error object goes to stderr, stdout left empty, so `eval` runs nothing.
+    /// `bad_name`, `not_found`, `not_env` (a single value, or a label that is not a variable's name), the service account's faults ([the token and the vault](help:account)), and the vault's (`not_optokens`, `ambiguous`, `vault_failed`), in [Secrets in the vault](help:secrets). Its error object goes to stderr, stdout left empty, so `eval` runs nothing.
     #[command(next_help_heading = "Run by the agent", verbatim_doc_comment)]
     Env {
         /// The Secret's service: a Profile's project or provider.
@@ -279,6 +281,9 @@ enum Cmd {
         /// The Secret's account.
         #[arg(long, default_value = secret::DEFAULT_ACCOUNT, verbatim_doc_comment)]
         account: String,
+        /// Syncs with the vault first: right after the Profile was changed on another host.
+        #[arg(long, verbatim_doc_comment)]
+        fresh: bool,
     },
     /// Lists every Secret in the vault, with its kind, description, Meta and Field labels, never a value.
     ///
@@ -288,7 +293,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads every item tagged `optokens` in the vault, and writes nothing. Items without the tag are not optokens' and not listed.
+    /// It reads every item tagged `optokens` from the Copy, synced first only past its Life of {const:LIFE_MINUTES} minutes or with `--fresh`, and writes nothing but the Copy. Items without the tag are not optokens' and not listed.
     ///
     /// ## What it answers
     ///
@@ -300,9 +305,13 @@ enum Cmd {
     ///
     /// ## What it may refuse
     ///
-    /// The service account's faults ([the token and the vault](help:account)), `op_failed`, and `not_optokens` for each tagged item that is not optokens' layout, in [Secrets in the vault](help:secrets).
+    /// The service account's faults ([the token and the vault](help:account)), `vault_failed`, and `not_optokens` for each tagged item that is not optokens' layout, in [Secrets in the vault](help:secrets).
     #[command(next_help_heading = "Run by the agent", verbatim_doc_comment)]
-    List,
+    List {
+        /// Syncs with the vault first: right after a Secret was changed, added or removed on another host.
+        #[arg(long, verbatim_doc_comment)]
+        fresh: bool,
+    },
     /// Removes a Secret: its item in the vault, every Field with it.
     ///
     /// ## When to run it
@@ -311,7 +320,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It finds the Secret's item in the vault and deletes it.
+    /// It syncs the Copy with the vault, finds the Secret's item and deletes it for good (not archived): one delete.
     ///
     /// ## What it answers
     ///
@@ -323,7 +332,7 @@ enum Cmd {
     ///
     /// ## What it may refuse
     ///
-    /// `bad_name`, the service account's faults ([the token and the vault](help:account)), and the vault's (`not_optokens`, `ambiguous`, `op_failed`), in [Secrets in the vault](help:secrets).
+    /// `bad_name`, the service account's faults ([the token and the vault](help:account)), and the vault's (`not_optokens`, `ambiguous`, `vault_failed`), in [Secrets in the vault](help:secrets).
     #[command(next_help_heading = "Run by the agent", verbatim_doc_comment)]
     Rm {
         /// The Secret's service.
@@ -351,7 +360,8 @@ enum Cmd {
 /// ## What trips you up
 ///
 /// - `{const:TOKEN_ENV}` wins whenever it is set: a token file is then not read, nor its mode checked.
-/// - The token is handed to `op` only in its environment, never on a command line.
+/// - The token is never on a command line nor in another process: optokens hands it to the 1Password Core it runs inside itself.
+/// - The Copy, `{const:COPY_FILE}` beside the token file, is sealed with a key derived from the token: another token's Copy does not open, and is rebuilt by a Sync.
 #[derive(Topic)]
 #[topic(name = "account")]
 struct AccountTopic;
@@ -398,7 +408,7 @@ pub(crate) fn help() -> Help {
         .constant("TOKEN_FILE", account::TOKEN_FILE)
         .constant("VAULT_FILE", account::VAULT_FILE)
         .constant("DEFAULT_VAULT", account::DEFAULT_VAULT)
-        .constant("CATEGORY", item::CATEGORY)
+        .constant("CATEGORY", format!("{:?}", item::CATEGORY))
         .constant("TAG", item::TAG)
         .constant("SERVICE", item::SERVICE)
         .constant("ACCOUNT", item::ACCOUNT)
@@ -411,6 +421,8 @@ pub(crate) fn help() -> Help {
         .constant("STRING", item::STRING)
         .constant("CONCEALED", item::CONCEALED)
         .constant("LINK_MINUTES", crate::link::LIFETIME.as_secs() / 60)
+        .constant("LIFE_MINUTES", crate::store::LIFE.as_secs() / 60)
+        .constant("COPY_FILE", crate::store::COPY_FILE)
         .constant("EXIT_OK", EXIT_OK)
         .constant("EXIT_ERROR", EXIT_ERROR)
 }
@@ -514,9 +526,14 @@ pub(crate) fn run(args: impl IntoIterator<Item = std::ffi::OsString>) -> Answer 
             account,
             field,
             json,
-        } => commands::get(&env, &service, &account, field.as_deref(), json),
-        Cmd::Env { service, account } => commands::env(&env, &service, &account),
-        Cmd::List => commands::list(&env),
+            fresh,
+        } => commands::get(&env, &service, &account, field.as_deref(), json, fresh),
+        Cmd::Env {
+            service,
+            account,
+            fresh,
+        } => commands::env(&env, &service, &account, fresh),
+        Cmd::List { fresh } => commands::list(&env, fresh),
         Cmd::Rm { service, account } => commands::rm(&env, &service, &account),
     }
 }

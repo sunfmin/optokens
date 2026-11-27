@@ -51,8 +51,8 @@ pub enum Fault {
     NotOptokens,
     /// Two items in the vault are the same Secret. Fix: delete one of them in 1Password.
     Ambiguous,
-    /// `op` failed, did not answer in time, or answered what optokens cannot read. Fix: `optokens doctor`, and see that the service account can reach the vault.
-    OpFailed,
+    /// 1Password refused or failed a call (no such vault, no grant, its rate limit), the network failed, or 1Password answered what optokens' Core cannot read. Fix: the one the finding names: `optokens init --check` for a grant, waiting for the hourly budget for a rate limit, updating optokens for an answer it cannot read.
+    VaultFailed,
 }
 
 /// What a Secret is for: a credential, or a Profile of environment variables.
