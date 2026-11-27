@@ -1,0 +1,7 @@
+{
+  "tree": "2f81f92604c0d7f137a2a02e5514bc3f32e6c8f0+d1fba762150c532c",
+  "picker": "codex:01a21cd7-4601-7d02-a986-a8af080b765a:default",
+  "author": "claude-code:a857c524-c2ff-5a8c-8c64-8b5178a58900:opus",
+  "none": "The successful rename test checks both the exact JSON and the vault edit, and the missing-source test checks the refusal kind, so the listed whole-function replacements offer no plausible survivor.",
+  "added_lines": 53
+}
