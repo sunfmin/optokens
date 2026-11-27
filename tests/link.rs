@@ -115,7 +115,7 @@ fn fields_over_plain_http_store_once_and_a_second_post_is_gone() {
     assert_eq!(put.code, 0, "{}{}", put.stdout, put.stderr);
     assert_eq!(
         put.json(),
-        json!({ "secret": "db/default", "changed": true, "kind": "static", "fields": ["Host", "Password", "User"] })
+        json!({ "secret": "db/default", "changed": true, "pending": false, "kind": "static", "fields": ["Host", "Password", "User"] })
     );
     assert!(
         !put.stdout.contains(MARKER) && !put.stderr.contains(MARKER),
@@ -181,7 +181,7 @@ fn a_bare_put_over_https_stores_one_value() {
     assert_eq!(put.code, 0, "{}", put.stderr);
     assert_eq!(
         put.json(),
-        json!({ "secret": "cloudflare/default", "changed": true, "kind": "static", "fields": null })
+        json!({ "secret": "cloudflare/default", "changed": true, "pending": false, "kind": "static", "fields": null })
     );
     assert_eq!(get(&host, &["get", "cloudflare"]).stdout, "cf+token");
     assert_eq!(

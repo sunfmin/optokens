@@ -45,5 +45,5 @@ opcore's sealed copy of the Vault's items tagged `optokens`, the file `copy` bes
 _Avoid_: cache.
 
 **Pending write**:
-A `put` or `rm` that 1Password could not take (its rate limit, the network, 1Password unavailable), kept sealed on this host beside the Copy until a Sync here writes it to the Vault. Reads on this host show it; another host does not until then.
-_Avoid_: queue, outbox.
+A `put`, `mv` or `rm` 1Password could not take (no network, the rate limit, 1Password down), after its Sync or, for `put` and `rm`, when that Sync could not reach it: opcore keeps it sealed in `copy.pending` beside the Copy, reads show it, and the next Sync that reaches the Vault pushes it. The command answers `pending: true`. Unlike the Copy, never derived: the file is its only record until pushed.
+_Avoid_: queue, offline write.

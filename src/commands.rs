@@ -141,8 +141,8 @@ fn put_secret(
     let (Some(name), true) = (name, faults.is_empty()) else {
         return Err(faults);
     };
-    // A write is never based on a stale item: the Copy syncs first, or,
-    // when 1Password cannot be reached, the write waits on this host.
+    // The Copy syncs first, so no write is based on a stale item; when
+    // 1Password cannot be reached, the write goes on from the Copy and waits.
     let mut store = to_write(env)?;
     let found = store.find(&name).map_err(|r| vec![r])?;
     let existing = found.as_ref().map(|f| &f.secret);
@@ -188,27 +188,20 @@ fn put_secret(
     // An item an earlier optokens wrote is rewritten in this layout, in place.
     let stale = found.as_ref().is_some_and(|f| !f.current);
     let changed = existing != Some(&merged) || stale;
-    let pending = changed
-        && store
+    let mut pending = false;
+    if changed {
+        pending = store
             .write(found.as_ref(), &name, &merged)
-            .map_err(|r| vec![r])?;
-    Ok(marked(
-        json!({
-            "secret": name.to_string(),
-            "changed": changed,
-            "kind": merged.kind.name(),
-            "fields": merged.labels(),
-        }),
-        pending,
-    ))
-}
-
-/// `answer` with `"pending": true` when its write waits on this host.
-fn marked(mut answer: Value, pending: bool) -> Value {
-    if pending {
-        answer["pending"] = json!(true);
+            .map_err(|r| vec![r])?
+            .waits();
     }
-    answer
+    Ok(json!({
+        "secret": name.to_string(),
+        "changed": changed,
+        "pending": pending,
+        "kind": merged.kind.name(),
+        "fields": merged.labels(),
+    }))
 }
 
 /// The link that asks for the `asked` Fields (a plain one's input showing
@@ -269,20 +262,20 @@ pub fn fresh_link(title: &str, description: Option<&str>, fields: Vec<link::Fiel
     )
 }
 
-/// The vault's Store, synced first when `fresh` (`--fresh`, and before a write).
+/// The vault's Store for `put` and `rm`: synced first, or, when 1Password
+/// cannot be reached, as held, its writes waiting on this host.
+fn to_write(env: &Env) -> Result<Store, Vec<Refusal>> {
+    let mut store = Store::open(env)?;
+    store.sync_to_write().map_err(|r| vec![r])?;
+    Ok(store)
+}
+
+/// The vault's Store, synced first when `fresh` (`--fresh`, and before `mv`).
 fn opened(env: &Env, fresh: bool) -> Result<Store, Vec<Refusal>> {
     let mut store = Store::open(env)?;
     if fresh && let Err(e) = store.sync() {
         return Err(vec![store.refused(e)]);
     }
-    Ok(store)
-}
-
-/// The vault's Store for a write: synced first, or, when 1Password cannot
-/// be reached, as held, its writes waiting on this host.
-fn to_write(env: &Env) -> Result<Store, Vec<Refusal>> {
-    let mut store = Store::open(env)?;
-    store.sync_to_write().map_err(|r| vec![r])?;
     Ok(store)
 }
 
@@ -345,10 +338,13 @@ pub fn env(env: &Env, service: &str, account: &str, fresh: bool) -> Answer {
 pub fn list(env: &Env, fresh: bool) -> Answer {
     match opened(env, fresh).and_then(|mut store| store.all()) {
         Ok(all) => Answer::json(&json!({
-            "secrets": all
-                .iter()
-                .map(|(n, s, pending)| marked(secret::summary(n, s), *pending))
-                .collect::<Vec<_>>(),
+            "secrets": all.iter().map(|(n, s, pending)| {
+                let mut summary = secret::summary(n, s);
+                if *pending {
+                    summary["pending"] = json!(true);
+                }
+                summary
+            }).collect::<Vec<_>>(),
         })),
         Err(faults) => Answer::refused(faults),
     }
@@ -377,11 +373,10 @@ fn moved(env: &Env, from: (&str, &str), to: (&str, &str)) -> Result<Value, Vec<R
             "`optokens rm` it first, or `mv` onto another name",
         )]);
     }
-    let pending = store
+    let written = store
         .write(Some(&found), &new, &found.secret)
         .map_err(|r| vec![r])?;
-    let answer = json!({ "secret": new.to_string(), "from": old.to_string() });
-    Ok(marked(answer, pending))
+    Ok(json!({ "secret": new.to_string(), "from": old.to_string(), "pending": written.waits() }))
 }
 
 /// Removes the Secret; nothing to remove is no fault.
@@ -391,15 +386,16 @@ pub fn rm(env: &Env, service: &str, account: &str) -> Answer {
         .and_then(|name| {
             let mut store = to_write(env)?;
             let found = store.find(&name).map_err(|r| vec![r])?;
-            let removed = found.as_ref().map(|f| store.delete(&f.item.id));
-            let pending = removed.transpose().map_err(|r| vec![r])?.unwrap_or(false);
+            let mut pending = false;
+            if let Some(found) = &found {
+                pending = store.delete(&found.item.id).map_err(|r| vec![r])?.waits();
+            }
             Ok((name, found.is_some(), pending))
         });
     match removed {
-        Ok((name, changed, pending)) => Answer::json(&marked(
-            json!({ "secret": name.to_string(), "changed": changed }),
-            pending,
-        )),
+        Ok((name, changed, pending)) => Answer::json(
+            &json!({ "secret": name.to_string(), "changed": changed, "pending": pending }),
+        ),
         Err(faults) => Answer::refused(faults),
     }
 }
