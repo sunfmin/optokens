@@ -29,7 +29,7 @@ pub(crate) const EXIT_ERROR: i32 = 2;
 /// ## Rules to know first
 ///
 /// - A secret's value is never in any process's command line (`ps` does not show it) and never in a file in plaintext: optokens runs no program to reach 1Password (it runs 1Password's own SDK Core inside itself), and its Copy of the vault is sealed.
-/// - `get`, `env` and `list` answer from the Copy, the sealed copy of the vault's Secrets in the config directory, with no network within {const:LIFE_MINUTES} minutes of its last Sync. Give `--fresh` right after a Secret was changed on another host. `put` and `rm` always sync first.
+/// - `get`, `env` and `list` answer from the Copy, the sealed copy of the vault's Secrets in the config directory, with no network within {const:LIFE_MINUTES} minutes of its last Sync. Give `--fresh` right after a Secret was changed on another host. `put`, `mv` and `rm` always sync first.
 /// - A command that takes a value a person knows waits for it to be submitted on a one-time link, which it prints first: it does not answer until the person submits it, or the link expires. Every other command asks nothing.
 ///
 /// ## Output
@@ -312,6 +312,42 @@ enum Cmd {
         #[arg(long, verbatim_doc_comment)]
         fresh: bool,
     },
+    /// Renames a Secret in place: the same item in the vault, under a new service or account.
+    ///
+    /// ## When to run it
+    ///
+    /// When a Secret's service or account is named wrong or changes, instead of `get`, `put` under the new name and `rm`: the item keeps its id and its 1Password history, and no value passes through the agent.
+    ///
+    /// ## What it reads and writes
+    ///
+    /// It syncs the Copy with the vault once, finds the Secret's item, sees that the new name holds nothing, and edits that one item: its title and its section `optokens` name the new Secret. Its Fields, their types, its kind, description, Meta, and what optokens does not own of it are kept: one write, whose answer the Copy keeps. `--to-account` is the new account, `--account`'s when not given: `optokens mv glm glm --to-account work` moves only the account.
+    ///
+    /// ## What it answers
+    ///
+    /// `secret`, the new `<service>/<account>`, and `from`, the old:
+    ///
+    /// ```json
+    /// { "secret": "claude/ultra", "from": "agent-account/default" }
+    /// ```
+    ///
+    /// ## What it may refuse
+    ///
+    /// `bad_name`, `not_found` (no Secret to move), `exists` (the new name is already a Secret, the old one among them), the service account's faults ([the token and the vault](help:account)), and the vault's (`not_optokens`, also for an item without the tag `optokens` titled as the new name; `ambiguous`; `vault_failed`), in [Secrets in the vault](help:secrets). A refusal writes nothing.
+    #[command(next_help_heading = "Run by the agent", verbatim_doc_comment)]
+    Mv {
+        /// The Secret's service.
+        #[arg(verbatim_doc_comment)]
+        service: String,
+        /// Its new service.
+        #[arg(verbatim_doc_comment)]
+        new_service: String,
+        /// The Secret's account.
+        #[arg(long, default_value = secret::DEFAULT_ACCOUNT, verbatim_doc_comment)]
+        account: String,
+        /// Its new account; `--account`'s when not given.
+        #[arg(long, verbatim_doc_comment)]
+        to_account: Option<String>,
+    },
     /// Removes a Secret: its item in the vault, every Field with it.
     ///
     /// ## When to run it
@@ -534,6 +570,15 @@ pub(crate) fn run(args: impl IntoIterator<Item = std::ffi::OsString>) -> Answer 
             fresh,
         } => commands::env(&env, &service, &account, fresh),
         Cmd::List { fresh } => commands::list(&env, fresh),
+        Cmd::Mv {
+            service,
+            new_service,
+            account,
+            to_account,
+        } => {
+            let to_account = to_account.as_deref().unwrap_or(&account);
+            commands::mv(&env, (&service, &account), (&new_service, to_account))
+        }
         Cmd::Rm { service, account } => commands::rm(&env, &service, &account),
     }
 }

@@ -1,4 +1,4 @@
-//! `put`, `get`, `env`, `list` and `rm`: each reads what it needs, lets
+//! `put`, `get`, `env`, `list`, `mv` and `rm`: each reads what it needs, lets
 //! `secret` decide, and reaches the vault through `store`.
 
 use crate::account::Env;
@@ -278,12 +278,16 @@ fn found(
     let mut store = opened(env, fresh)?;
     match store.find(&name).map_err(|r| vec![r])? {
         Some(found) => Ok((name, found.secret)),
-        None => Err(vec![Refusal::of(
-            &secret::Fault::NotFound,
-            format!("the vault has no Secret `{name}`"),
-            "run `optokens list` to see what it has, or `optokens put` it",
-        )]),
+        None => Err(vec![not_found(&name)]),
     }
+}
+
+fn not_found(name: &Name) -> Refusal {
+    Refusal::of(
+        &secret::Fault::NotFound,
+        format!("the vault has no Secret `{name}`"),
+        "run `optokens list` to see what it has, or `optokens put` it",
+    )
 }
 
 /// The value alone, or with `json` the whole Secret; errors on stderr.
@@ -326,6 +330,35 @@ pub fn list(env: &Env, fresh: bool) -> Answer {
         })),
         Err(faults) => Answer::refused(faults),
     }
+}
+
+/// Renames the Secret `from` to `to` in place: one Sync, then one edit of
+/// its item, which keeps its id, Fields, kind, description, Meta, history
+/// and what optokens does not own of it.
+pub fn mv(env: &Env, from: (&str, &str), to: (&str, &str)) -> Answer {
+    match moved(env, from, to) {
+        Ok(answer) => Answer::json(&answer),
+        Err(faults) => Answer::refused(faults),
+    }
+}
+
+fn moved(env: &Env, from: (&str, &str), to: (&str, &str)) -> Result<Value, Vec<Refusal>> {
+    let old = Name::new(from.0, from.1).map_err(|r| vec![r])?;
+    let new = Name::new(to.0, to.1).map_err(|r| vec![r])?;
+    let mut store = opened(env, true)?;
+    let found = store.find(&old).map_err(|r| vec![r])?;
+    let found = found.ok_or_else(|| vec![not_found(&old)])?;
+    if store.find(&new).map_err(|r| vec![r])?.is_some() {
+        return Err(vec![Refusal::of(
+            &secret::Fault::Exists,
+            format!("the vault already has a Secret `{new}`"),
+            "`optokens rm` it first, or `mv` onto another name",
+        )]);
+    }
+    store
+        .write(Some(&found), &new, &found.secret)
+        .map_err(|r| vec![r])?;
+    Ok(json!({ "secret": new.to_string(), "from": old.to_string() }))
 }
 
 /// Removes the Secret; nothing to remove is no fault.

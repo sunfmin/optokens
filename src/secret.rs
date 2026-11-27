@@ -43,6 +43,8 @@ pub enum Fault {
     PipeNotText,
     /// No Secret of that service and account is in the vault. Fix: `optokens list` to see what is there, or `optokens put` it.
     NotFound,
+    /// `mv`'s new name is already a Secret in the vault, perhaps the one it would move. Fix: `optokens rm` that Secret first, or `mv` onto another name.
+    Exists,
     /// `get` cannot pick the value: `--field` names no Field of the Secret, a Secret of labelled Fields was asked for without `--field`, or a single value was asked for with one. Fix: the `get` line the finding names.
     NoSuchField,
     /// `env` has nothing to export: the Secret is a single value, or a label is not an environment variable's name. Fix: `optokens get` its value instead.

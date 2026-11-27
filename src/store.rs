@@ -74,7 +74,7 @@ impl Store {
     /// `name`'s Secret, `None` when the vault has none: the one item of its
     /// title, or its earlier title, whose section names it. Refused when an
     /// item without the tag holds either title, as a Sync of this process
-    /// saw it (`put` and `rm` sync first).
+    /// saw it (`put`, `mv` and `rm` sync first).
     pub fn find(&mut self, name: &Name) -> Result<Option<Found>, Refusal> {
         let items = self.items()?;
         let others = self.copy.others().unwrap_or_default();
