@@ -391,10 +391,8 @@ pub fn rm(env: &Env, service: &str, account: &str) -> Answer {
         .and_then(|name| {
             let mut store = to_write(env)?;
             let found = store.find(&name).map_err(|r| vec![r])?;
-            let pending = match &found {
-                Some(found) => store.delete(&found.item.id).map_err(|r| vec![r])?,
-                None => false,
-            };
+            let removed = found.as_ref().map(|f| store.delete(&f.item.id));
+            let pending = removed.transpose().map_err(|r| vec![r])?.unwrap_or(false);
             Ok((name, found.is_some(), pending))
         });
     match removed {
