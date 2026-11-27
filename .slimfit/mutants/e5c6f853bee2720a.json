@@ -1,0 +1,51 @@
+{
+  "tree": "5894d6fd7f40f1ff8c2cc2a37423cb7f73aaab04+9cb3298bec4dd465",
+  "picker": "codex:01a21cae-5943-7e00-96e1-9b15ccec2313:default",
+  "author": "claude-code:835e5e5a-8e44-52fc-9c9e-e2ba1a4548a0:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/store.rs:18:50: replace * with +",
+        "why": "Immediate warm reads and the zero-duration override can both pass when the default Copy lifetime drops from 300 seconds to 65.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/cli.rs:424:64: replace / with % in help",
+        "why": "The Copy can expire correctly while the CLI manual reports a lifetime of zero minutes.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/item.rs:238:52: delete ! in layout",
+        "why": "A legacy item with an explicitly empty Description field and nonempty notes is the boundary where the notes fallback matters.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/standin.rs:193:25: replace += with *= in answer",
+        "why": "The stand-in can return the edited fields while leaving the version and update timestamp unchanged, which write and readback assertions may miss.",
+        "outcome": "killed",
+        "first_outcome": "survived"
+      },
+      {
+        "name": "src/store.rs:203:9: replace <impl Core for Backend>::release_client with ()",
+        "why": "The stand-in already releases clients with a no-op, so its tests cannot detect lost release forwarding to the real Core.",
+        "outcome": "killed",
+        "first_outcome": "survived"
+      }
+    ]
+  },
+  "removed_tests": {
+    "rust": [
+      "src/item.rs:546: a_field_naming_its_section_by_id_alone_is_read_and_rewritten_as_optokens",
+      "src/item.rs:687: current_reads_the_name_only_from_the_section_named_optokens_by_its_label_or_id",
+      "src/op.rs:67: each_call_is_an_item_command_in_the_vault_with_no_value",
+      "tests/doctor.rs:172: an_op_that_hangs_is_cut_off_at_the_bound",
+      "tests/init.rs:83: the_token_is_written_owner_only_and_checked_with_op_and_a_second_run_is_the_same",
+      "tests/init.rs:363: a_probe_that_does_not_read_back_is_refused",
+      "tests/secrets.rs:789: an_op_that_fails_is_refused_with_what_it_said"
+    ]
+  },
+  "added_lines": 495
+}

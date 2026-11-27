@@ -11,6 +11,7 @@
 //! - `core.garble_writes`: a create answers its item with the values of its
 //!   section `fields` emptied;
 //! - `core.hang_ms`: each item call waits this long before it answers;
+//! - `core.released`: each client id released, in order;
 //! - `calls`: every call, `{ "program": "core", "method", "ids", "seen" }`, where
 //!   `seen` is what any process could see then: every command line (`ps`)
 //!   and every file under `TMPDIR`.
@@ -98,7 +99,14 @@ impl Core for Standin {
         answer.map(|a| a.to_string())
     }
 
-    fn release_client(&mut self, _id: &str) {}
+    fn release_client(&mut self, id: &str) {
+        let mut state = self.load();
+        match state["core"]["released"].as_array_mut() {
+            Some(ids) => ids.push(json!(id)),
+            None => state["core"]["released"] = json!([id]),
+        }
+        self.save(&state);
+    }
 }
 
 /// The answer to `method` called with `p`, on the vault in `state`.
@@ -257,6 +265,28 @@ fn walk(dir: &Path, files: &mut Vec<Value>) {
         } else {
             let text = std::fs::read(&path).map(|b| String::from_utf8_lossy(&b).into_owned());
             files.push(json!({ "path": path, "text": text.unwrap_or_default() }));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_put_answers_the_item_one_version_on() {
+        let mut state = json!({ "core": { "items": [] } });
+        let made = answer(
+            &mut state,
+            "ItemsCreateAll",
+            &json!({ "params": [{ "title": "t", "category": "Login", "vaultId": "v0" }] }),
+        );
+        let mut item = made["individualResponses"][0]["content"].clone();
+        for version in [2, 3] {
+            item = answer(&mut state, "ItemsPut", &json!({ "item": item }));
+            assert_eq!(item["version"], version);
+            assert_eq!(item["updatedAt"], format!("t{version}"));
+            assert_eq!(state["core"]["items"][0], item, "the vault keeps the Put");
         }
     }
 }
