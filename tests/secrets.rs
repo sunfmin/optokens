@@ -81,7 +81,7 @@ fn put_list_get_env_rm_a_profile() {
     assert_eq!((put.code, put.stderr.as_str()), (0, ""));
     assert_eq!(
         put.json(),
-        json!({ "secret": "glm/default", "changed": true, "kind": "profile",
+        json!({ "secret": "glm/default", "changed": true, "pending": false, "kind": "profile",
                 "fields": ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] })
     );
     assert_eq!(
@@ -166,13 +166,13 @@ fn put_list_get_env_rm_a_profile() {
     let rm = run(&host, &["rm", "glm"]);
     assert_eq!(
         rm.json(),
-        json!({ "secret": "glm/default", "changed": true })
+        json!({ "secret": "glm/default", "changed": true, "pending": false })
     );
     assert_eq!(calls(&host), synced(&["ItemsDeleteAll"]));
     assert_eq!(host.items(), json!([]), "deleted, not archived");
     assert_eq!(
         run(&host, &["rm", "glm"]).json(),
-        json!({ "secret": "glm/default", "changed": false })
+        json!({ "secret": "glm/default", "changed": false, "pending": false })
     );
     assert_eq!(calls(&host), SYNC);
     assert_eq!(run(&host, &["list"]).json(), json!({ "secrets": [] }));
@@ -489,7 +489,7 @@ fn a_single_value_is_got_bare_and_never_exported() {
     let described = run(&host, &["put", "cloudflare", "--description", "DNS edits"]);
     assert_eq!(
         described.json(),
-        json!({ "secret": "cloudflare/default", "changed": true, "kind": "static", "fields": null })
+        json!({ "secret": "cloudflare/default", "changed": true, "pending": false, "kind": "static", "fields": null })
     );
     assert_eq!(run(&host, &["get", "cloudflare"]).stdout, "cf-token");
 }
@@ -756,7 +756,7 @@ fn a_secret_titled_with_a_slash_is_found_by_every_command_and_put_retitles_it_in
     let put = run(&host, &["put", "bark", "--set", "URL=https://push/x"]);
     assert_eq!(
         put.json(),
-        json!({ "secret": "bark/default", "changed": true, "kind": "static", "fields": ["URL"] })
+        json!({ "secret": "bark/default", "changed": true, "pending": false, "kind": "static", "fields": ["URL"] })
     );
     assert_eq!(calls(&host).last().unwrap(), "ItemsPut");
     assert_eq!(items().as_array().unwrap().len(), 1);
@@ -1175,7 +1175,7 @@ fn mv_renames_a_secret_in_place_with_one_sync_and_one_write() {
         (mv.code, mv.json()),
         (
             0,
-            json!({ "secret": "claude/ultra", "from": "agent-account/default" })
+            json!({ "secret": "claude/ultra", "from": "agent-account/default", "pending": false })
         )
     );
     let methods = calls(&host);
@@ -1280,4 +1280,69 @@ fn a_rate_limit_is_refused_with_a_fix_that_names_both_budgets() {
         "{fix}"
     );
     assert!(!fix.contains("hourly budget of reads and writes"), "{fix}");
+}
+
+/// After a Sync, a write 1Password cannot take now (network, rate limit,
+/// down) waits, sealed in `copy.pending`: the command answers `pending:
+/// true` with a `warning:` line, reads show the write, and the next Sync
+/// that reaches the vault pushes it.
+#[test]
+fn a_write_the_vault_cannot_take_now_waits_and_the_next_sync_pushes_it() {
+    let host = host();
+    assert_eq!(run(&host, &["put", "db", "--set", "A=1"]).code, 0);
+    let mut state = host.state();
+    state["core"]["fail"] = json!({
+        "ItemsPut": "error sending request",
+        "ItemsCreateAll": { "name": "RateLimitExceeded", "message": "rate limit exceeded" },
+        "ItemsDeleteAll": "error sending request"
+    });
+    host.set_state(&state);
+
+    let put = run(&host, &["put", "db", "--set", "A=SECRET-TWO"]);
+    assert_eq!(put.code, 0, "{}", put.stdout);
+    assert_eq!(put.json()["changed"], true);
+    assert_eq!(put.json()["pending"], true);
+    assert!(
+        put.stderr
+            .starts_with("warning: 1Password could not take the edit of "),
+        "{}",
+        put.stderr
+    );
+    let made = run(&host, &["put", "web", "--set", "B=SECRET-WEB"]);
+    assert_eq!((made.code, &made.json()["pending"]), (0, &json!(true)));
+    let gone = run(&host, &["rm", "web"]);
+    assert_eq!((gone.code, &gone.json()["pending"]), (0, &json!(true)));
+    assert_eq!(
+        run(&host, &["get", "db", "--field", "A"]).stdout,
+        "SECRET-TWO"
+    );
+    assert_eq!(run(&host, &["get", "web", "--field", "B"]).code, 2);
+    assert_eq!(
+        host.items().as_array().unwrap().len(),
+        1,
+        "the vault holds the old item only"
+    );
+    sealed(&host, &["SECRET-TWO", "SECRET-WEB"]);
+    let other = host.run(
+        &["get", "db", "--field", "A"],
+        &[(TOKEN.0, "ops_another")],
+        None,
+    );
+    assert_eq!(other.code, 2, "another token does not open what waits");
+    assert!(other.stderr.contains("copy.pending"), "{}", other.stderr);
+
+    let mut state = host.state();
+    state["core"]["fail"] = Value::Null;
+    host.set_state(&state);
+    let list = run(&host, &["list", "--fresh"]);
+    assert_eq!(list.code, 0, "{}", list.stderr);
+    let fresh = run(&host, &["get", "db", "--field", "A", "--fresh"]);
+    assert_eq!(fresh.stdout, "SECRET-TWO", "pushed: {}", fresh.stderr);
+    assert_eq!(
+        host.items().as_array().unwrap().len(),
+        1,
+        "web made and removed"
+    );
+    let again = run(&host, &["put", "db", "--set", "A=3"]);
+    assert_eq!(again.json()["pending"], false);
 }

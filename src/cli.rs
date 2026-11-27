@@ -29,7 +29,7 @@ pub(crate) const EXIT_ERROR: i32 = 2;
 /// ## Rules to know first
 ///
 /// - A secret's value is never in any process's command line (`ps` does not show it) and never in a file in plaintext: optokens runs no program to reach 1Password (it runs 1Password's own SDK Core inside itself), and its Copy of the vault is sealed.
-/// - `get`, `env` and `list` answer from the Copy, the sealed copy of the vault's Secrets in the config directory, with no network within {const:LIFE_MINUTES} minutes of its last Sync. Past that, when the Sync fails (no network, 1Password down), they still answer from the Copy, with one line on stderr, `warning: 1Password could not be synced (<why>); answering from the local copy synced <age> ago`, and try no Sync again for {const:LIFE_MINUTES} minutes. Give `--fresh` right after a Secret was changed on another host. `--fresh`, `put`, `mv` and `rm` always sync first, and fail when the Sync fails.
+/// - `get`, `env` and `list` answer from the Copy, the sealed copy of the vault's Secrets in the config directory, with no network within {const:LIFE_MINUTES} minutes of its last Sync. Past that, when the Sync fails (no network, 1Password down), they still answer from the Copy, with one line on stderr, `warning: 1Password could not be synced (<why>); answering from the local copy synced <age> ago`, and try no Sync again for {const:LIFE_MINUTES} minutes. Give `--fresh` right after a Secret was changed on another host. `--fresh`, `put`, `mv` and `rm` always sync first, and fail when the Sync fails. After that Sync, a write 1Password cannot take now (no network, the rate limit, 1Password down) waits, sealed in `{const:PENDING_FILE}` beside the Copy: the command answers `"pending": true`, with one `warning:` line on stderr naming the write, why it waits and the file; every read shows it, and the next Sync that reaches 1Password (any command past the Copy's Life, or `--fresh`) pushes it, each change replayed on the item as it then is. Any other refusal of a write is its error, and nothing waits.
 /// - A command that takes a value a person knows waits for it to be submitted on a one-time link, which it prints first: it does not answer until the person submits it, or the link expires. Every other command asks nothing.
 ///
 /// ## Output
@@ -183,11 +183,12 @@ enum Cmd {
     ///
     /// - `secret`: `<service>/<account>`.
     /// - `changed`: whether it wrote; `false` when the Secret already held all it was given.
+    /// - `pending`: `true` when 1Password could not take the write now, so it waits for the next Sync (see `optokens --help`); `false` when 1Password took it, or nothing was written.
     /// - `kind`: `static` or `profile`.
     /// - `fields`: the Secret's labels now, `null` for a single value.
     ///
     /// ```json
-    /// { "secret": "deploy-db/default", "changed": true, "kind": "static", "fields": ["Username", "Password"] }
+    /// { "secret": "deploy-db/default", "changed": true, "pending": false, "kind": "static", "fields": ["Username", "Password"] }
     /// ```
     ///
     /// ## What it may refuse
@@ -324,10 +325,10 @@ enum Cmd {
     ///
     /// ## What it answers
     ///
-    /// `secret`, the new `<service>/<account>`, and `from`, the old:
+    /// `secret`, the new `<service>/<account>`; `from`, the old; and `pending`, `true` when 1Password could not take the edit now, so it waits for the next Sync (see `optokens --help`):
     ///
     /// ```json
-    /// { "secret": "claude/ultra", "from": "agent-account/default" }
+    /// { "secret": "claude/ultra", "from": "agent-account/default", "pending": false }
     /// ```
     ///
     /// ## What it may refuse
@@ -360,10 +361,10 @@ enum Cmd {
     ///
     /// ## What it answers
     ///
-    /// `secret`, `<service>/<account>`, and `changed`: `false` when there was no such Secret, which is no fault, so it can run again.
+    /// `secret`, `<service>/<account>`; `changed`, `false` when there was no such Secret, which is no fault, so it can run again; and `pending`, `true` when 1Password could not take the delete now, so it waits for the next Sync (see `optokens --help`).
     ///
     /// ```json
-    /// { "secret": "cloudflare/default", "changed": true }
+    /// { "secret": "cloudflare/default", "changed": true, "pending": false }
     /// ```
     ///
     /// ## What it may refuse
@@ -398,6 +399,7 @@ enum Cmd {
 /// - `{const:TOKEN_ENV}` wins whenever it is set: a token file is then not read, nor its mode checked.
 /// - The token is never on a command line nor in another process: optokens hands it to the 1Password Core it runs inside itself.
 /// - The Copy, `{const:COPY_FILE}` beside the token file, is sealed with a key derived from the token: another token's Copy does not open, and is rebuilt by a Sync.
+/// - The writes waiting for 1Password, `{const:PENDING_FILE}` beside the Copy, are sealed under the token too, but are never rebuilt: do not delete the file, or what waits in it is lost. Once a write has waited, the file stays, even when nothing waits in it any more: a token other than the one that sealed it then fails every command that reads the Copy (`vault_failed`, naming the file, `the key does not open this file`). Run with that token again; when it is gone for good, move the file aside, and whatever still waits in it is lost.
 #[derive(Topic)]
 #[topic(name = "account")]
 struct AccountTopic;
@@ -459,6 +461,10 @@ pub(crate) fn help() -> Help {
         .constant("LINK_MINUTES", crate::link::LIFETIME.as_secs() / 60)
         .constant("LIFE_MINUTES", crate::store::LIFE.as_secs() / 60)
         .constant("COPY_FILE", crate::store::COPY_FILE)
+        .constant(
+            "PENDING_FILE",
+            format!("{}.pending", crate::store::COPY_FILE),
+        )
         .constant("EXIT_OK", EXIT_OK)
         .constant("EXIT_ERROR", EXIT_ERROR)
 }

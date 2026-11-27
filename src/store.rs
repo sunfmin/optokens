@@ -110,24 +110,37 @@ impl Store {
 
     /// Writes `secret` as `name`'s item: over the item `found`, keeping what
     /// optokens does not own of it, or a new one. One write; the Copy keeps
-    /// what it answered.
+    /// what it answered, or it waits ([`Written`]).
     pub fn write(
         &mut self,
         found: Option<&Found>,
         name: &Name,
         secret: &Secret,
-    ) -> Result<(), Refusal> {
+    ) -> Result<Written, Refusal> {
         let template = item::template(name, secret, found.map(|f| &f.item));
-        let written = match found {
-            Some(f) => self.copy.edit(&f.item.id, &template).map(drop),
-            None => self.copy.create_all(&[template]).map(drop),
-        };
-        written.map_err(|e| self.refused(e))
+        self.written(|copy| match found {
+            Some(f) => copy.edit(&f.item.id, &template).map(drop),
+            None => copy.create_all(&[template]).map(drop),
+        })
     }
 
     /// Deletes the item `id` for good (not archived), as `op item delete` did.
-    pub fn delete(&mut self, id: &str) -> Result<(), Refusal> {
-        self.copy.delete_all(&[id]).map_err(|e| self.refused(e))
+    pub fn delete(&mut self, id: &str) -> Result<Written, Refusal> {
+        self.written(|copy| copy.delete_all(&[id]))
+    }
+
+    /// `write` on the Copy, refused with its error, or how it went: a write
+    /// that waits is the one this call warned of.
+    fn written(
+        &mut self,
+        write: impl FnOnce(&mut Copy<Backend>) -> Result<(), Error>,
+    ) -> Result<Written, Refusal> {
+        let before = self.copy.write_warnings().len();
+        write(&mut self.copy).map_err(|e| self.refused(e))?;
+        Ok(match self.copy.write_warnings().get(before..) {
+            Some([.., why]) => Written::Waits(why.clone()),
+            _ => Written::Through,
+        })
     }
 
     /// opcore's error `e` as the refusal `vault_failed`, with its fix.
@@ -141,6 +154,22 @@ impl Store {
             ),
         };
         Refusal::of(&Fault::VaultFailed, format!("1Password: {e}"), fix)
+    }
+}
+
+/// How a write went: into the vault, or, when 1Password cannot take it now
+/// (network, rate limit, down), into the Copy's pending file, sealed, for
+/// the next Sync that reaches the vault to push (opcore's ADR 0003).
+#[derive(Debug, PartialEq)]
+pub enum Written {
+    Through,
+    /// opcore's warning, also on stderr: which write, why, where it waits.
+    Waits(String),
+}
+
+impl Written {
+    pub fn waits(&self) -> bool {
+        matches!(self, Written::Waits(_))
     }
 }
 
