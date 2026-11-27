@@ -6,7 +6,7 @@
 mod common;
 
 use common::link::start;
-use common::{Host, Ran, synced};
+use common::{Host, Ran, first_synced, synced};
 use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -107,7 +107,7 @@ fn the_token_is_written_owner_only_and_checked_through_the_copy_and_a_second_run
     );
     assert_eq!(
         host.core_calls(),
-        synced(&["ItemsCreateAll", "ItemsDeleteAll"]),
+        first_synced(&["ItemsCreateAll", "ItemsDeleteAll"]),
         "one Sync, one create, the read from the Copy, one delete"
     );
     assert_eq!(host.items(), json!([]), "the probe is removed");
@@ -221,7 +221,7 @@ fn no_write_grant_is_refused_at_the_probe_and_a_probe_left_behind_is_written_ove
         fault.starts_with("check `probe_written`: 1Password: You do not have permission"),
         "{fault}"
     );
-    assert_eq!(host.core_calls(), synced(&["ItemsCreateAll"]));
+    assert_eq!(host.core_calls(), first_synced(&["ItemsCreateAll"]));
 
     // Written, but not removed: the probe stays, and the next check writes over it.
     let mut state = host.state();
