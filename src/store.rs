@@ -60,23 +60,15 @@ impl Store {
     }
 
     /// Makes the Copy the vault's again: `--fresh`, and before a write.
-    pub fn sync(&mut self) -> Result<(), Refusal> {
-        self.synced().map_err(Refusal::from)
-    }
-
-    /// As [`Store::sync`], saying apart a vault the service account does
-    /// not see: `init`'s first check.
-    pub fn synced(&mut self) -> Result<(), Unsynced> {
-        self.copy.sync().map_err(|e| match unseen(&e) {
-            true => Unsynced::NoVault(self.failed(e)),
-            false => Unsynced::Failed(self.failed(e)),
-        })
+    /// opcore's error as it is, so `init` tells `Error::NoVault` apart.
+    pub fn sync(&mut self) -> Result<(), Error> {
+        self.copy.sync()
     }
 
     /// The Copy's items, synced first if past its Life.
     fn items(&mut self) -> Result<Vec<Item>, Refusal> {
         let items = self.copy.items().map(|i| i.into_iter().cloned().collect());
-        items.map_err(|e| self.failed(e))
+        items.map_err(|e| self.refused(e))
     }
 
     /// `name`'s Secret, `None` when the vault has none: the one item of its
@@ -130,15 +122,16 @@ impl Store {
             Some(f) => self.copy.edit(&f.item.id, &template).map(drop),
             None => self.copy.create_all(&[template]).map(drop),
         };
-        written.map_err(|e| self.failed(e))
+        written.map_err(|e| self.refused(e))
     }
 
     /// Deletes the item `id` for good (not archived), as `op item delete` did.
     pub fn delete(&mut self, id: &str) -> Result<(), Refusal> {
-        self.copy.delete_all(&[id]).map_err(|e| self.failed(e))
+        self.copy.delete_all(&[id]).map_err(|e| self.refused(e))
     }
 
-    fn failed(&self, e: Error) -> Refusal {
+    /// opcore's error `e` as the refusal `vault_failed`, with its fix.
+    pub fn refused(&self, e: Error) -> Refusal {
         let fix = match e {
             Error::RateLimited(_) => "wait for the service account's hourly budget of reads and writes to refill (`op service-account ratelimit` shows it), then run the command again".to_string(),
             Error::OutOfDate(_) => "update optokens (`brew upgrade optokens`): its 1Password Core may be older than 1Password's servers".to_string(),
@@ -163,28 +156,6 @@ fn life() -> Duration {
         return Duration::from_millis(ms);
     }
     LIFE
-}
-
-/// Why a Sync failed.
-pub enum Unsynced {
-    /// The service account sees no vault of the Store's name.
-    NoVault(Refusal),
-    /// Anything else: the sign-in, the listing, the network.
-    Failed(Refusal),
-}
-
-impl From<Unsynced> for Refusal {
-    fn from(u: Unsynced) -> Refusal {
-        match u {
-            Unsynced::NoVault(r) | Unsynced::Failed(r) => r,
-        }
-    }
-}
-
-/// Whether `e` is opcore's answer that the service account sees no vault of
-/// that title.
-fn unseen(e: &Error) -> bool {
-    matches!(e, Error::NoVault(_))
 }
 
 /// The Core the Copy signs in on: 1Password's, made only when it first

@@ -17,8 +17,10 @@
 //!
 //! As the real Core does, it answers an item's fields sorted by id, a field
 //! in no section with the section id `""`, and that unnamed section.
+use opcore::Item;
+#[cfg(test)]
+use opcore::ItemParams;
 use opcore::core::{Core, Failure};
-use opcore::{Item, ItemParams};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -147,10 +149,17 @@ fn answer(state: &mut Value, method: &str, p: &Value) -> Value {
         "ItemsCreateAll" => {
             let mut each = Vec::new();
             for (n, given) in p["params"].as_array().unwrap().iter().enumerate() {
-                let params: ItemParams = params(given);
-                let id = format!("{:0>26}", next + n as u64);
-                let vault = given["vaultId"].as_str().unwrap_or_default();
-                let item = serde_json::to_value(keep(&params, &id, vault, 1)).unwrap();
+                // What the Core adds to the create's params.
+                let mut made = json!({ "fields": [], "sections": [], "tags": [], "notes": "" });
+                for (k, v) in given.as_object().unwrap() {
+                    made[k] = v.clone();
+                }
+                made["id"] = json!(format!("{:0>26}", next + n as u64));
+                made["version"] = json!(1);
+                (made["createdAt"], made["updatedAt"]) = (json!("t"), json!("t1"));
+                let mut made: Item = serde_json::from_value(made).unwrap();
+                sort(&mut made);
+                let item = serde_json::to_value(made).unwrap();
                 items.push(item.clone());
                 let mut answered = item;
                 if garble {
@@ -192,37 +201,9 @@ fn answer(state: &mut Value, method: &str, p: &Value) -> Value {
     }
 }
 
-/// `ItemParams` as the Core reads them; it serializes only.
-fn params(given: &Value) -> ItemParams {
-    let mut given = given.clone();
-    for (key, empty) in [
-        ("fields", json!([])),
-        ("sections", json!([])),
-        ("tags", json!([])),
-        ("notes", json!("")),
-    ] {
-        if given.get(key).is_none() {
-            given[key] = empty;
-        }
-    }
-    let item: Item = serde_json::from_value(json!({
-        "id": "", "title": given["title"], "category": given["category"], "vaultId": "",
-        "version": 0, "tags": given["tags"], "notes": given["notes"],
-        "fields": given["fields"], "sections": given["sections"],
-        "createdAt": "", "updatedAt": "",
-    }))
-    .unwrap();
-    ItemParams {
-        category: item.category,
-        title: item.title,
-        fields: item.fields,
-        sections: item.sections,
-        notes: item.notes,
-        tags: item.tags,
-    }
-}
-
-/// The item the Core keeps of `params`, made as `id` at `version` in `vault`.
+/// The item the Core keeps of `params`, made as `id` at `version` in
+/// `vault`: for the layout's round-trip tests.
+#[cfg(test)]
 pub fn keep(params: &ItemParams, id: &str, vault: &str, version: u32) -> Item {
     let mut item = Item {
         id: id.into(),

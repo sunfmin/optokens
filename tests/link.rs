@@ -8,7 +8,7 @@
 mod common;
 
 use common::link::{DOMAIN, PEM, Waiting};
-use common::{Host, Ran};
+use common::{Host, Ran, SYNC};
 use serde_json::{Value, json};
 
 const TOKEN: (&str, &str) = ("OP_SERVICE_ACCOUNT_TOKEN", "ops_test_token");
@@ -38,9 +38,6 @@ fn kinds(answer: &Value) -> Vec<&str> {
         .map(|f| f["kind"].as_str().unwrap_or("-"))
         .collect()
 }
-
-/// What every Sync calls: a sign-in, the vault's id, one list.
-const SYNC: [&str; 3] = ["init_client", "VaultsList", "ItemsList"];
 
 fn get(host: &Host, args: &[&str]) -> Ran {
     host.run(args, &[TOKEN], None)

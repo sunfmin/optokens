@@ -10,7 +10,7 @@ use crate::link::{self, Input};
 use crate::refusal::Refusal;
 use crate::secret::{DEFAULT_ACCOUNT, Kind, Name, Secret, Values};
 use crate::serve::Endpoint;
-use crate::store::{Store, Unsynced};
+use crate::store::Store;
 use agent_help::Table;
 use serde_json::{Value, json};
 
@@ -132,15 +132,17 @@ fn checks(store: &mut Store) -> Result<(), Refusal> {
         )
     };
     let by = |check| move |refusal: Refusal| failed(check, &refusal.fault);
-    store.synced().map_err(|unsynced| match unsynced {
-        Unsynced::NoVault(_) => failed(
-            Check::VaultListed,
-            &format!(
-                "1Password lists no vault `{vault}` to the service account: it does not exist, or the service account has no access to it"
+    if let Err(e) = store.sync() {
+        return Err(match e {
+            opcore::Error::NoVault(_) => failed(
+                Check::VaultListed,
+                &format!(
+                    "1Password lists no vault `{vault}` to the service account: it does not exist, or the service account has no access to it"
+                ),
             ),
-        ),
-        Unsynced::Failed(refusal) => failed(Check::VaultRead, &refusal.fault),
-    })?;
+            e => failed(Check::VaultRead, &store.refused(e).fault),
+        });
+    }
     let probe = Name::new(PROBE, DEFAULT_ACCOUNT).expect("a valid name");
     let left = store.find(&probe).map_err(by(Check::VaultRead))?;
     let secret = Secret {

@@ -261,8 +261,8 @@ pub fn fresh_link(title: &str, description: Option<&str>, fields: Vec<link::Fiel
 /// The vault's Store, synced first when `fresh` (`--fresh`, and before a write).
 fn opened(env: &Env, fresh: bool) -> Result<Store, Vec<Refusal>> {
     let mut store = Store::open(env)?;
-    if fresh {
-        store.sync().map_err(|r| vec![r])?;
+    if fresh && let Err(e) = store.sync() {
+        return Err(vec![store.refused(e)]);
     }
     Ok(store)
 }

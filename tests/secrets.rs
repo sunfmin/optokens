@@ -5,12 +5,10 @@
 
 mod common;
 
-use common::{Host, Ran, meta, stored, value};
+use common::{Host, Ran, SYNC, meta, stored, synced, value};
 use serde_json::{Value, json};
 
 const TOKEN: (&str, &str) = ("OP_SERVICE_ACCOUNT_TOKEN", "ops_test_token");
-/// What every Sync calls: a sign-in, the vault's id, one list.
-const SYNC: [&str; 3] = ["init_client", "VaultsList", "ItemsList"];
 /// A Copy past its Life at once.
 const STALE: (&str, &str) = ("OPTOKENS_TEST_COPY_LIFE_MS", "0");
 
@@ -31,11 +29,6 @@ fn calls(host: &Host) -> Vec<String> {
     let calls = host.core_calls();
     host.forget_calls();
     calls
-}
-
-/// `SYNC` and then `more`.
-fn synced(more: &[&str]) -> Vec<String> {
-    SYNC.iter().chain(more).map(|c| c.to_string()).collect()
 }
 
 fn kinds(error: &Value) -> Vec<&str> {

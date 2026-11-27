@@ -256,3 +256,11 @@ impl Host {
         self.set_state(&state);
     }
 }
+
+/// What every Sync calls: a sign-in, the vault's id, one list.
+pub const SYNC: [&str; 3] = ["init_client", "VaultsList", "ItemsList"];
+
+/// [`SYNC`] and then `more`.
+pub fn synced(more: &[&str]) -> Vec<String> {
+    SYNC.iter().chain(more).map(|c| c.to_string()).collect()
+}

@@ -6,7 +6,7 @@
 mod common;
 
 use common::link::start;
-use common::{Host, Ran};
+use common::{Host, Ran, synced};
 use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -14,9 +14,6 @@ use std::path::Path;
 /// The token a person enters: it must reach the Core and the token file, and
 /// nothing else.
 const TOKEN: &str = "ops_MARKER-9d2e-the-new-token";
-
-/// What every Sync calls: a sign-in, the vault's id, one list.
-const SYNC: [&str; 3] = ["init_client", "VaultsList", "ItemsList"];
 
 /// A host on the tailnet (127.0.0.1, no certificate) whose Core takes
 /// [`TOKEN`] alone, its state's `core` merged with `core`.
@@ -54,11 +51,6 @@ fn kinds(answer: &Value) -> Vec<&str> {
         .iter()
         .map(|f| f["kind"].as_str().unwrap_or("-"))
         .collect()
-}
-
-/// `SYNC` and then `more`.
-fn synced(more: &[&str]) -> Vec<String> {
-    SYNC.iter().chain(more).map(|c| c.to_string()).collect()
 }
 
 /// The config directory's files, by name.
