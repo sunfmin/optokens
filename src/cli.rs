@@ -399,7 +399,7 @@ enum Cmd {
 /// - `{const:TOKEN_ENV}` wins whenever it is set: a token file is then not read, nor its mode checked.
 /// - The token is never on a command line nor in another process: optokens hands it to the 1Password Core it runs inside itself.
 /// - The Copy, `{const:COPY_FILE}` beside the token file, is sealed with a key derived from the token: another token's Copy does not open, and is rebuilt by a Sync.
-/// - The writes waiting for 1Password, `{const:PENDING_FILE}` beside the Copy, are sealed under the token too, but are never rebuilt: do not delete the file, or what waits in it is lost. While it holds writes, a token other than the one that wrote them fails every command that reads the Copy, naming the file, until that token is back and a Sync has pushed them; when it is gone for good, move the file aside, and what waits in it is lost.
+/// - The writes waiting for 1Password, `{const:PENDING_FILE}` beside the Copy, are sealed under the token too, but are never rebuilt: do not delete the file, or what waits in it is lost. Once a write has waited, the file stays, even when nothing waits in it any more: a token other than the one that sealed it then fails every command that reads the Copy (`vault_failed`, naming the file, `the key does not open this file`). Run with that token again; when it is gone for good, move the file aside, and whatever still waits in it is lost.
 #[derive(Topic)]
 #[topic(name = "account")]
 struct AccountTopic;
