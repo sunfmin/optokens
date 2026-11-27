@@ -213,6 +213,11 @@ fn the_copy_answers_within_its_life_and_a_sync_gets_only_what_changed() {
         synced(&["ItemsGetAll"]),
         "a cold Copy gets all"
     );
+    assert_eq!(
+        host.state()["core"]["released"],
+        json!(["7"]),
+        "the Client signed in is released"
+    );
 
     for args in [&["list"][..], &["get", "a"], &["env", "a"]] {
         run(&host, args);
