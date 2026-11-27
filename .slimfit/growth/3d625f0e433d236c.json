@@ -1,0 +1,10 @@
+{
+  "tree": "6c762065132329e4c245ef7df1fe9d6196d54c5f+d1fba762150c532c",
+  "lines": 165,
+  "serves": "optokens#23",
+  "considered": "opcore's own in-memory stand-in (tests/stand, not exported, and the tests run the binary as one process per command, so the vault must live in a file); keeping op.rs behind the Store seam (the issue removes op); a Box<dyn Core> instead of the Backend enum (no smaller)",
+  "reviewer": "codex:01a21caa-19d0-7e12-93ce-b9dec5f9b74b:default",
+  "author": "claude-code:369b20e6-52cc-5558-8264-3ef32202f75b:opus",
+  "cut": "In src/program.rs, remove the piped-stdin path left by op and drop the None arguments in src/doctor.rs and src/serve.rs. In src/store.rs, return opcore::Error directly from sync, delete synced, Unsynced, its conversion, and unseen, and reuse the existing refusal mapping in src/commands.rs and src/init.rs while matching NoVault directly in init. In src/standin.rs, add the response metadata and missing defaults to each create request, then deserialize it directly into Item and reuse sort, dropping the Item-to-ItemParams round trip. In tests/common/mod.rs, put the shared SYNC and synced expectations in one place and import them from tests/init.rs, tests/link.rs, and tests/secrets.rs.",
+  "answer": "All four made, in commit 'cut what the growth review named': bounded takes no stdin; Store::sync answers opcore::Error, Store::refused maps it, init matches Error::NoVault; the stand-in builds the created Item from the params directly (keep is test-only); SYNC and synced live in tests/common. Growth fell from 236 to 165 lines; the rest is the stand-in Core the binary tests need (it replaces examples/standin's op half) and the Copy plumbing in store.rs."
+}
