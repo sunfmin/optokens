@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{Host, Ran, SYNC, meta, stored, synced, value};
+use common::{FIRST_SYNC, Host, Ran, SYNC, first_synced, meta, stored, synced, value};
 use serde_json::{Value, json};
 
 const TOKEN: (&str, &str) = ("OP_SERVICE_ACCOUNT_TOKEN", "ops_test_token");
@@ -86,7 +86,7 @@ fn put_list_get_env_rm_a_profile() {
     );
     assert_eq!(
         calls(&host),
-        synced(&["ItemsCreateAll"]),
+        first_synced(&["ItemsCreateAll"]),
         "a Sync, then one write, no read back"
     );
     sealed(&host, &known);
@@ -210,7 +210,7 @@ fn the_copy_answers_within_its_life_and_a_sync_gets_only_what_changed() {
     assert_eq!(cold.json()["secrets"].as_array().unwrap().len(), 2);
     assert_eq!(
         calls(&host),
-        synced(&["ItemsGetAll"]),
+        first_synced(&["ItemsGetAll"]),
         "a cold Copy gets all"
     );
     assert_eq!(
@@ -242,7 +242,11 @@ fn the_copy_answers_within_its_life_and_a_sync_gets_only_what_changed() {
         .map(|c| c["ids"].clone())
         .collect();
     assert_eq!(calls(&host), synced(&["ItemsGetAll"]));
-    assert_eq!(got[3], json!(["a1"]));
+    assert_eq!(
+        got[SYNC.len()],
+        json!(["a1"]),
+        "the one item changed, alone"
+    );
 
     // `--fresh` syncs within the Life.
     host.change("b", "value", "B-2");
@@ -501,7 +505,7 @@ fn two_pipes_are_stored_concealed_in_one_put_and_one_write() {
         put.json()["fields"],
         json!(["User", "Password", "SigningKey"])
     );
-    assert_eq!(calls(&host), synced(&["ItemsCreateAll"]));
+    assert_eq!(calls(&host), first_synced(&["ItemsCreateAll"]));
     assert_eq!(
         host.field_types("deploy-db"),
         json!({ "User": "Text", "Password": "Concealed", "SigningKey": "Concealed" })
@@ -614,7 +618,7 @@ fn put_refuses_every_fault_before_it_reaches_the_vault() {
     assert_eq!(kinds(&names.json()), ["not_env_name", "duplicate_label"]);
     assert_eq!(
         calls(&host),
-        [SYNC, SYNC].concat(),
+        [&FIRST_SYNC[..], &SYNC[..]].concat(),
         "one Sync for the described put, one for the refused names"
     );
     assert_eq!(run(&host, &["put", "p", "--set", "A=1"]).code, 0);
