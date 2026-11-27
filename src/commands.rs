@@ -141,8 +141,9 @@ fn put_secret(
     let (Some(name), true) = (name, faults.is_empty()) else {
         return Err(faults);
     };
-    // A write is never based on a stale item: the Copy syncs first.
-    let mut store = opened(env, true)?;
+    // A write is never based on a stale item: the Copy syncs first, or,
+    // when 1Password cannot be reached, the write waits on this host.
+    let mut store = to_write(env)?;
     let found = store.find(&name).map_err(|r| vec![r])?;
     let existing = found.as_ref().map(|f| &f.secret);
     let single = bare && (!annotated || existing.is_none());
@@ -187,17 +188,27 @@ fn put_secret(
     // An item an earlier optokens wrote is rewritten in this layout, in place.
     let stale = found.as_ref().is_some_and(|f| !f.current);
     let changed = existing != Some(&merged) || stale;
-    if changed {
-        store
+    let pending = changed
+        && store
             .write(found.as_ref(), &name, &merged)
             .map_err(|r| vec![r])?;
+    Ok(marked(
+        json!({
+            "secret": name.to_string(),
+            "changed": changed,
+            "kind": merged.kind.name(),
+            "fields": merged.labels(),
+        }),
+        pending,
+    ))
+}
+
+/// `answer` with `"pending": true` when its write waits on this host.
+fn marked(mut answer: Value, pending: bool) -> Value {
+    if pending {
+        answer["pending"] = json!(true);
     }
-    Ok(json!({
-        "secret": name.to_string(),
-        "changed": changed,
-        "kind": merged.kind.name(),
-        "fields": merged.labels(),
-    }))
+    answer
 }
 
 /// The link that asks for the `asked` Fields (a plain one's input showing
@@ -267,6 +278,14 @@ fn opened(env: &Env, fresh: bool) -> Result<Store, Vec<Refusal>> {
     Ok(store)
 }
 
+/// The vault's Store for a write: synced first, or, when 1Password cannot
+/// be reached, as held, its writes waiting on this host.
+fn to_write(env: &Env) -> Result<Store, Vec<Refusal>> {
+    let mut store = Store::open(env)?;
+    store.sync_to_write().map_err(|r| vec![r])?;
+    Ok(store)
+}
+
 /// `name`'s Secret from the vault, or the refusal that it is not there.
 fn found(
     env: &Env,
@@ -326,7 +345,10 @@ pub fn env(env: &Env, service: &str, account: &str, fresh: bool) -> Answer {
 pub fn list(env: &Env, fresh: bool) -> Answer {
     match opened(env, fresh).and_then(|mut store| store.all()) {
         Ok(all) => Answer::json(&json!({
-            "secrets": all.iter().map(|(n, s)| secret::summary(n, s)).collect::<Vec<_>>(),
+            "secrets": all
+                .iter()
+                .map(|(n, s, pending)| marked(secret::summary(n, s), *pending))
+                .collect::<Vec<_>>(),
         })),
         Err(faults) => Answer::refused(faults),
     }
@@ -355,10 +377,11 @@ fn moved(env: &Env, from: (&str, &str), to: (&str, &str)) -> Result<Value, Vec<R
             "`optokens rm` it first, or `mv` onto another name",
         )]);
     }
-    store
+    let pending = store
         .write(Some(&found), &new, &found.secret)
         .map_err(|r| vec![r])?;
-    Ok(json!({ "secret": new.to_string(), "from": old.to_string() }))
+    let answer = json!({ "secret": new.to_string(), "from": old.to_string() });
+    Ok(marked(answer, pending))
 }
 
 /// Removes the Secret; nothing to remove is no fault.
@@ -366,17 +389,19 @@ pub fn rm(env: &Env, service: &str, account: &str) -> Answer {
     let removed = Name::new(service, account)
         .map_err(|r| vec![r])
         .and_then(|name| {
-            let mut store = opened(env, true)?;
+            let mut store = to_write(env)?;
             let found = store.find(&name).map_err(|r| vec![r])?;
-            if let Some(found) = &found {
-                store.delete(&found.item.id).map_err(|r| vec![r])?;
-            }
-            Ok((name, found.is_some()))
+            let pending = match &found {
+                Some(found) => store.delete(&found.item.id).map_err(|r| vec![r])?,
+                None => false,
+            };
+            Ok((name, found.is_some(), pending))
         });
     match removed {
-        Ok((name, changed)) => {
-            Answer::json(&json!({ "secret": name.to_string(), "changed": changed }))
-        }
+        Ok((name, changed, pending)) => Answer::json(&marked(
+            json!({ "secret": name.to_string(), "changed": changed }),
+            pending,
+        )),
         Err(faults) => Answer::refused(faults),
     }
 }

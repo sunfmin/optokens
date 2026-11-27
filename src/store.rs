@@ -18,10 +18,17 @@ use std::time::Duration;
 pub const LIFE: Duration = Duration::from_secs(5 * 60);
 /// The Copy's file, in the config directory beside the token file.
 pub const COPY_FILE: &str = "copy";
+/// What stderr says of a write that waits on this host, after why 1Password
+/// could not be reached.
+pub const WAITS: &str =
+    "stored on this host and written to the vault by the next command that reaches it";
 
 pub struct Store {
     copy: Copy<Backend>,
     vault: String,
+    /// Why this process's Sync could not reach 1Password, when a write
+    /// went on without it ([`Store::sync_to_write`]).
+    unreached: Option<String>,
 }
 
 /// A Secret found in the vault: its item as the Copy holds it, what it
@@ -52,7 +59,11 @@ impl Store {
             item::TAG,
             life(),
         );
-        Store { copy, vault }
+        Store {
+            copy,
+            vault,
+            unreached: None,
+        }
     }
 
     pub fn vault(&self) -> &str {
@@ -63,6 +74,20 @@ impl Store {
     /// opcore's error as it is, so `init` tells `Error::NoVault` apart.
     pub fn sync(&mut self) -> Result<(), Error> {
         self.copy.sync()
+    }
+
+    /// The Sync before a write (`put`, `rm`). When 1Password cannot be
+    /// reached (its rate limit, the network, 1Password unavailable), the
+    /// write goes on from the Copy as held and waits on this host (opcore's
+    /// pending writes, ADR 0016); any other failure is refused.
+    pub fn sync_to_write(&mut self) -> Result<(), Refusal> {
+        match self.copy.sync() {
+            Err(e) if e.is_transient() => {
+                self.unreached = Some(e.to_string());
+                Ok(())
+            }
+            synced => synced.map_err(|e| self.refused(e)),
+        }
     }
 
     /// The Copy's items, synced first if past its Life.
@@ -94,40 +119,67 @@ impl Store {
         Ok(found.pop())
     }
 
-    /// Every Secret in the vault, by service, then account; refused with every item that is
-    /// not optokens' layout.
-    pub fn all(&mut self) -> Result<Vec<(Name, Secret)>, Vec<Refusal>> {
+    /// Every Secret in the vault, by service, then account, each with
+    /// whether a write of it waits on this host; refused with every item
+    /// that is not optokens' layout.
+    pub fn all(&mut self) -> Result<Vec<(Name, Secret, bool)>, Vec<Refusal>> {
         let items = self.items().map_err(|r| vec![r])?;
-        let (found, faults): (Vec<_>, Vec<_>) =
-            items.iter().map(item::read).partition(Result::is_ok);
+        let waiting = self.waiting().map_err(|r| vec![r])?;
+        let (found, faults): (Vec<_>, Vec<_>) = items
+            .iter()
+            .map(|i| item::read(i).map(|(n, s)| (n, s, waiting.contains(&i.id))))
+            .partition(Result::is_ok);
         if !faults.is_empty() {
             return Err(faults.into_iter().filter_map(Result::err).collect());
         }
         let mut found: Vec<_> = found.into_iter().filter_map(Result::ok).collect();
-        found.sort_by(|(a, _), (b, _)| a.cmp(b));
+        found.sort_by(|(a, ..), (b, ..)| a.cmp(b));
         Ok(found)
     }
 
     /// Writes `secret` as `name`'s item: over the item `found`, keeping what
     /// optokens does not own of it, or a new one. One write; the Copy keeps
-    /// what it answered.
+    /// what it answered. True when it waits on this host for the vault.
     pub fn write(
         &mut self,
         found: Option<&Found>,
         name: &Name,
         secret: &Secret,
-    ) -> Result<(), Refusal> {
+    ) -> Result<bool, Refusal> {
         let template = item::template(name, secret, found.map(|f| &f.item));
         let written = match found {
-            Some(f) => self.copy.edit(&f.item.id, &template).map(drop),
-            None => self.copy.create_all(&[template]).map(drop),
+            Some(f) => self.copy.edit(&f.item.id, &template).map(|i| i.id),
+            None => self
+                .copy
+                .create_all(&[template])
+                .map(|mut m| m.remove(0).id),
         };
-        written.map_err(|e| self.refused(e))
+        let id = written.map_err(|e| self.refused(e))?;
+        self.waits(&id)
     }
 
-    /// Deletes the item `id` for good (not archived), as `op item delete` did.
-    pub fn delete(&mut self, id: &str) -> Result<(), Refusal> {
-        self.copy.delete_all(&[id]).map_err(|e| self.refused(e))
+    /// Deletes the item `id` for good (not archived), as `op item delete`
+    /// did. True when it waits on this host for the vault.
+    pub fn delete(&mut self, id: &str) -> Result<bool, Refusal> {
+        self.copy.delete_all(&[id]).map_err(|e| self.refused(e))?;
+        self.waits(id)
+    }
+
+    /// The ids of the items with writes not in the vault yet.
+    fn waiting(&mut self) -> Result<Vec<String>, Refusal> {
+        let pending = self.copy.pending().map_err(|e| self.refused(e));
+        Ok(pending?.into_iter().map(|p| p.id).collect())
+    }
+
+    /// Whether item `id` has a write waiting; if so, says on stderr why
+    /// and when it reaches the vault.
+    fn waits(&mut self, id: &str) -> Result<bool, Refusal> {
+        let waits = self.waiting()?.iter().any(|w| w == id);
+        if waits {
+            let why = self.unreached.as_deref().unwrap_or("earlier writes wait");
+            eprintln!("1Password could not be reached ({why}); {WAITS}");
+        }
+        Ok(waits)
     }
 
     /// opcore's error `e` as the refusal `vault_failed`, with its fix.

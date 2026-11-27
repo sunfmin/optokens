@@ -86,6 +86,8 @@ fn put_help_says_what_the_link_serves_where_for_how_long_and_what_it_answers() {
         "Stdout keeps only the final JSON answer",
         "## What it answers",
         "`link_expired`",
+        "`pending`: `true` only when 1Password could not be reached",
+        "1Password could not be reached (<why>); stored on this host and written to the vault by the next command that reaches it",
     ] {
         assert!(help.contains(said), "put --help lacks {said:?}: {help}");
     }
