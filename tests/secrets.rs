@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{Host, Ran, SYNC, meta, stored, synced, value};
+use common::{Host, RESYNC, Ran, SYNC, meta, resynced, stored, synced, value};
 use serde_json::{Value, json};
 
 const TOKEN: (&str, &str) = ("OP_SERVICE_ACCOUNT_TOKEN", "ops_test_token");
@@ -106,7 +106,7 @@ fn put_list_get_env_rm_a_profile() {
     assert_eq!(again.json()["changed"], false);
     assert_eq!(
         calls(&host),
-        SYNC,
+        RESYNC,
         "the Copy holds what the create answered: nothing to get"
     );
 
@@ -120,7 +120,7 @@ fn put_list_get_env_rm_a_profile() {
             "ANTHROPIC_MODEL"
         ])
     );
-    assert_eq!(calls(&host), synced(&["ItemsGetAll", "ItemsPut"]));
+    assert_eq!(calls(&host), resynced(&["ItemsGetAll", "ItemsPut"]));
     sealed(&host, &known);
 
     // Within the Copy's Life, list, get and env call nothing.
@@ -168,13 +168,13 @@ fn put_list_get_env_rm_a_profile() {
         rm.json(),
         json!({ "secret": "glm/default", "changed": true })
     );
-    assert_eq!(calls(&host), synced(&["ItemsDeleteAll"]));
+    assert_eq!(calls(&host), resynced(&["ItemsDeleteAll"]));
     assert_eq!(host.items(), json!([]), "deleted, not archived");
     assert_eq!(
         run(&host, &["rm", "glm"]).json(),
         json!({ "secret": "glm/default", "changed": false })
     );
-    assert_eq!(calls(&host), SYNC);
+    assert_eq!(calls(&host), RESYNC);
     assert_eq!(run(&host, &["list"]).json(), json!({ "secrets": [] }));
 
     let gone = run(&host, &["get", "glm"]);
@@ -227,7 +227,7 @@ fn the_copy_answers_within_its_life_and_a_sync_gets_only_what_changed() {
     // Past its Life, nothing changed: one list, no get.
     let stale = host.run(&["get", "b"], &[TOKEN, STALE], None);
     assert_eq!(stale.stdout, "B-1");
-    assert_eq!(calls(&host), SYNC);
+    assert_eq!(calls(&host), RESYNC);
 
     // One item changed on another host: one list, one get of it alone.
     host.change("a", "value", "A-2");
@@ -241,8 +241,8 @@ fn the_copy_answers_within_its_life_and_a_sync_gets_only_what_changed() {
         .iter()
         .map(|c| c["ids"].clone())
         .collect();
-    assert_eq!(calls(&host), synced(&["ItemsGetAll"]));
-    assert_eq!(got[3], json!(["a1"]));
+    assert_eq!(calls(&host), resynced(&["ItemsGetAll"]));
+    assert_eq!(got[2], json!(["a1"]));
 
     // `--fresh` syncs within the Life.
     host.change("b", "value", "B-2");
@@ -261,10 +261,82 @@ fn the_copy_answers_within_its_life_and_a_sync_gets_only_what_changed() {
     }
     assert_eq!(
         calls(&host),
-        [synced(&["ItemsGetAll"]), synced(&[]), synced(&[])].concat()
+        [resynced(&["ItemsGetAll"]), resynced(&[]), resynced(&[])].concat()
     );
     assert_eq!(run(&host, &["get", "b"]).stdout, "B-2");
     sealed(&host, &["A-1", "A-2", "B-1", "B-2"]);
+}
+
+/// Past its Life, a read whose Sync fails answers from the Copy, with one
+/// warning on stderr naming why and how old the Copy is; `--fresh` and a
+/// write still fail. A Copy that never synced has nothing to answer.
+#[test]
+fn past_its_life_a_read_whose_sync_fails_answers_from_the_copy_with_a_warning() {
+    let host = host();
+    assert_eq!(run(&host, &["put", "db", "--set", "A=1"]).code, 0);
+    let mut state = host.state();
+    state["core"]["fail"] = json!({ "ItemsList": "network unreachable" });
+    host.set_state(&state);
+
+    let get = host.run(&["get", "db", "--field", "A"], &[TOKEN, STALE], None);
+    assert_eq!((get.code, get.stdout.as_str()), (0, "1"), "{}", get.stderr);
+    assert!(
+        get.stderr.starts_with(
+            "warning: 1Password could not be synced (network unreachable); answering from the local copy synced "
+        ),
+        "{}",
+        get.stderr
+    );
+    assert_eq!(get.stderr.lines().count(), 1, "{}", get.stderr);
+    let env = host.run(&["env", "db"], &[TOKEN, STALE], None);
+    assert_eq!((env.code, env.stdout.as_str()), (0, "export A='1'\n"));
+    assert!(env.stderr.starts_with("warning: "), "{}", env.stderr);
+    let list = host.run(&["list"], &[TOKEN, STALE], None);
+    assert_eq!(list.code, 0, "{}", list.stderr);
+    assert_eq!(list.json()["secrets"][0]["service"], "db");
+    assert!(list.stderr.starts_with("warning: "), "{}", list.stderr);
+
+    let fresh = run(&host, &["get", "db", "--fresh"]);
+    assert_eq!((fresh.code, fresh.stdout.as_str()), (2, ""));
+    assert_eq!(kinds(&fresh.error()), ["vault_failed"]);
+    let put = host.run(&["put", "db", "--set", "A=2"], &[TOKEN, STALE], None);
+    assert_eq!(kinds(&put.json()), ["vault_failed"]);
+
+    let cold = Host::new(
+        &[],
+        json!({ "core": { "fail": { "ItemsList": "network unreachable" } } }),
+    );
+    let never = run(&cold, &["get", "db"]);
+    assert_eq!((never.code, never.stdout.as_str()), (2, ""));
+    assert_eq!(kinds(&never.error()), ["vault_failed"]);
+}
+
+/// The Copy keeps its vault's id; when that id no longer names the vault,
+/// one `VaultsList` finds it again and the Sync goes on.
+#[test]
+fn a_copy_whose_vault_id_changed_finds_the_vault_again() {
+    let host = host();
+    assert_eq!(run(&host, &["put", "db", "--set", "A=1"]).code, 0);
+    let mut state = host.state();
+    state["core"]["vaults"] = json!([{ "id": "v9", "title": "optokens" }]);
+    for item in state["core"]["items"].as_array_mut().unwrap() {
+        item["vaultId"] = json!("v9");
+    }
+    host.set_state(&state);
+    calls(&host);
+
+    let get = host.run(&["get", "db", "--field", "A"], &[TOKEN, STALE], None);
+    assert_eq!(
+        (get.code, get.stdout.as_str(), get.stderr.as_str()),
+        (0, "1", "")
+    );
+    assert_eq!(
+        calls(&host),
+        ["init_client", "ItemsList", "VaultsList", "ItemsList"],
+        "the list on the old id fails, the vault is found again, the list retried"
+    );
+    host.run(&["get", "db"], &[TOKEN, STALE], None);
+    assert_eq!(calls(&host), RESYNC, "the new id is kept");
 }
 
 /// A Field's type follows the way this put set it, both ways; one it does not
@@ -614,7 +686,7 @@ fn put_refuses_every_fault_before_it_reaches_the_vault() {
     assert_eq!(kinds(&names.json()), ["not_env_name", "duplicate_label"]);
     assert_eq!(
         calls(&host),
-        [SYNC, SYNC].concat(),
+        [SYNC.as_slice(), &RESYNC].concat(),
         "one Sync for the described put, one for the refused names"
     );
     assert_eq!(run(&host, &["put", "p", "--set", "A=1"]).code, 0);

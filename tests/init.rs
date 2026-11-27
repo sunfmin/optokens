@@ -6,7 +6,7 @@
 mod common;
 
 use common::link::start;
-use common::{Host, Ran, synced};
+use common::{Host, Ran, resynced, synced};
 use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -250,7 +250,7 @@ fn no_write_grant_is_refused_at_the_probe_and_a_probe_left_behind_is_written_ove
     );
     assert_eq!(
         host.core_calls(),
-        synced(&["ItemsGetAll", "ItemsPut", "ItemsDeleteAll"]),
+        resynced(&["ItemsGetAll", "ItemsPut", "ItemsDeleteAll"]),
         "the probe left behind is edited, its version got by the edit"
     );
     assert_eq!(host.items(), json!([]));

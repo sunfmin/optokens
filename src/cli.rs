@@ -29,7 +29,7 @@ pub(crate) const EXIT_ERROR: i32 = 2;
 /// ## Rules to know first
 ///
 /// - A secret's value is never in any process's command line (`ps` does not show it) and never in a file in plaintext: optokens runs no program to reach 1Password (it runs 1Password's own SDK Core inside itself), and its Copy of the vault is sealed.
-/// - `get`, `env` and `list` answer from the Copy, the sealed copy of the vault's Secrets in the config directory, with no network within {const:LIFE_MINUTES} minutes of its last Sync. Give `--fresh` right after a Secret was changed on another host. `put`, `mv` and `rm` always sync first.
+/// - `get`, `env` and `list` answer from the Copy, the sealed copy of the vault's Secrets in the config directory, with no network within {const:LIFE_MINUTES} minutes of its last Sync. Past that, when the Sync fails (no network, 1Password down), they still answer from the Copy, with one line on stderr, `warning: 1Password could not be synced (<why>); answering from the local copy synced <age> ago`, and try no Sync again for {const:LIFE_MINUTES} minutes. Give `--fresh` right after a Secret was changed on another host. `--fresh`, `put`, `mv` and `rm` always sync first, and fail when the Sync fails.
 /// - A command that takes a value a person knows waits for it to be submitted on a one-time link, which it prints first: it does not answer until the person submits it, or the link expires. Every other command asks nothing.
 ///
 /// ## Output
@@ -211,7 +211,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads the Secret from the Copy, with no network within {const:LIFE_MINUTES} minutes of its last Sync, and writes nothing but the Copy. Past that, or with `--fresh`, it syncs first: give `--fresh` right after the Secret was changed on another host.
+    /// It reads the Secret from the Copy, with no network within {const:LIFE_MINUTES} minutes of its last Sync, and writes nothing but the Copy. Past that, or with `--fresh`, it syncs first: give `--fresh` right after the Secret was changed on another host. Past that, a Sync that fails still answers from the Copy, with a `warning:` line on stderr; with `--fresh`, it fails (`vault_failed`).
     ///
     /// ## What it answers
     ///
@@ -259,7 +259,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads the Secret from the Copy, with no network within {const:LIFE_MINUTES} minutes of its last Sync, and writes nothing but the Copy. Past that, or with `--fresh`, it syncs first: give `--fresh` right after the Secret was changed on another host.
+    /// It reads the Secret from the Copy, with no network within {const:LIFE_MINUTES} minutes of its last Sync, and writes nothing but the Copy. Past that, or with `--fresh`, it syncs first: give `--fresh` right after the Secret was changed on another host. Past that, a Sync that fails still answers from the Copy, with a `warning:` line on stderr; with `--fresh`, it fails (`vault_failed`).
     ///
     /// ## What it answers
     ///
@@ -293,7 +293,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads every item tagged `optokens` from the Copy, synced first only past its Life of {const:LIFE_MINUTES} minutes or with `--fresh`, and writes nothing but the Copy. Items without the tag are not optokens' and not listed.
+    /// It reads every item tagged `optokens` from the Copy, synced first only past its Life of {const:LIFE_MINUTES} minutes or with `--fresh`, and writes nothing but the Copy. Past its Life, a Sync that fails still answers from the Copy, with a `warning:` line on stderr; with `--fresh`, it fails (`vault_failed`). Items without the tag are not optokens' and not listed.
     ///
     /// ## What it answers
     ///

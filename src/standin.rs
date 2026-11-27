@@ -5,7 +5,9 @@
 //! that file, which the tailscale stand-in (`examples/standin.rs`) shares:
 //!
 //! - `core.items`: the vault's items, as the Core answers them;
-//! - `core.vaults`: the titles `VaultsList` answers (default `optokens`);
+//! - `core.vaults`: the vaults `VaultsList` answers (default `optokens`), each
+//!   a title, the `i`th with the id `v{i}`, or `{ "id", "title" }`; a call
+//!   naming another vault id is refused;
 //! - `core.token`: the one token it signs in (default any);
 //! - `core.fail`: `{ "<Method>": "<message>" }`, the Core's error for that call;
 //! - `core.garble_writes`: a create answers its item with the values of its
@@ -91,7 +93,9 @@ impl Core for Standin {
         let p = &inv["invocation"]["parameters"]["parameters"];
         let mut state = self.load();
         let recorded = self.record(&mut state, &method, &p["item_ids"]);
-        let answer = recorded.map(|()| answer(&mut state, &method, p));
+        let answer = recorded
+            .and_then(|()| unknown_vault(&state, &method, p))
+            .map(|()| answer(&mut state, &method, p));
         self.save(&state);
         if let Some(ms) = state["core"]["hang_ms"].as_u64() {
             std::thread::sleep(std::time::Duration::from_millis(ms));
@@ -112,13 +116,7 @@ impl Core for Standin {
 /// The answer to `method` called with `p`, on the vault in `state`.
 fn answer(state: &mut Value, method: &str, p: &Value) -> Value {
     if method == "VaultsList" {
-        let titles = state["core"]["vaults"].as_array().cloned();
-        let titles = titles.unwrap_or_else(|| vec![json!("optokens")]);
-        return titles
-            .iter()
-            .enumerate()
-            .map(|(i, t)| json!({ "id": format!("v{i}"), "title": t }))
-            .collect();
+        return Value::Array(vaults(state));
     }
     if !state["core"]["items"].is_array() {
         state["core"]["items"] = json!([]);
@@ -267,6 +265,39 @@ fn walk(dir: &Path, files: &mut Vec<Value>) {
             files.push(json!({ "path": path, "text": text.unwrap_or_default() }));
         }
     }
+}
+
+/// The vaults `VaultsList` answers: `core.vaults`, each a title, the `i`th
+/// with the id `v{i}`, or `{ "id", "title" }` as it is.
+fn vaults(state: &Value) -> Vec<Value> {
+    let vaults = state["core"]["vaults"].as_array().cloned();
+    let vaults = vaults.unwrap_or_else(|| vec![json!("optokens")]);
+    vaults
+        .iter()
+        .enumerate()
+        .map(|(i, v)| match v {
+            Value::String(_) => json!({ "id": format!("v{i}"), "title": v }),
+            _ => v.clone(),
+        })
+        .collect()
+}
+
+/// A call naming a vault id `VaultsList` does not answer, refused as Core
+/// v0.4.1 refuses it (opcore's stand-in, measured there): `ItemsGetAll` says
+/// "bad request", every other call "item couldn't be found".
+fn unknown_vault(state: &Value, method: &str, p: &Value) -> Result<(), Failure> {
+    let Some(asked) = p["vault_id"].as_str() else {
+        return Ok(());
+    };
+    if vaults(state).iter().any(|v| v["id"] == asked) {
+        return Ok(());
+    }
+    let message = if method == "ItemsGetAll" {
+        "bad request"
+    } else {
+        "item couldn't be found"
+    };
+    Err(error("ItemApi", message))
 }
 
 #[cfg(test)]

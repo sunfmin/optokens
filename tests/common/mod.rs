@@ -257,10 +257,19 @@ impl Host {
     }
 }
 
-/// What every Sync calls: a sign-in, the vault's id, one list.
+/// What a Copy's first Sync calls: a sign-in, the vault's id, one list.
 pub const SYNC: [&str; 3] = ["init_client", "VaultsList", "ItemsList"];
+
+/// What a later Sync calls: the Copy keeps its vault's id, so a sign-in
+/// to it and one list, no `VaultsList`.
+pub const RESYNC: [&str; 2] = ["init_client", "ItemsList"];
 
 /// [`SYNC`] and then `more`.
 pub fn synced(more: &[&str]) -> Vec<String> {
     SYNC.iter().chain(more).map(|c| c.to_string()).collect()
+}
+
+/// [`RESYNC`] and then `more`.
+pub fn resynced(more: &[&str]) -> Vec<String> {
+    RESYNC.iter().chain(more).map(|c| c.to_string()).collect()
 }
