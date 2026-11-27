@@ -29,7 +29,7 @@ pub(crate) const EXIT_ERROR: i32 = 2;
 /// ## Rules to know first
 ///
 /// - A secret's value is never in any process's command line (`ps` does not show it) and never in a file in plaintext: optokens runs no program to reach 1Password (it runs 1Password's own SDK Core inside itself), and its Copy of the vault is sealed.
-/// - `get`, `env` and `list` answer from the Copy, the sealed copy of the vault's Secrets in the config directory, with no network within {const:LIFE_MINUTES} minutes of its last Sync. Past that, when the Sync fails (no network, 1Password down), they still answer from the Copy, with one line on stderr, `warning: 1Password could not be synced (<why>); answering from the local copy synced <age> ago`, and try no Sync again for {const:LIFE_MINUTES} minutes. Give `--fresh` right after a Secret was changed on another host. `--fresh`, `put`, `mv` and `rm` always sync first, and fail when the Sync fails. After that Sync, a write 1Password cannot take now (no network, the rate limit, 1Password down) waits, sealed in `{const:PENDING_FILE}` beside the Copy: the command answers `"pending": true`, with one `warning:` line on stderr naming the write, why it waits and the file; every read shows it, and the next Sync that reaches 1Password (any command past the Copy's Life, or `--fresh`) pushes it, each change replayed on the item as it then is. Any other refusal of a write is its error, and nothing waits.
+/// - `get`, `env` and `list` answer from the Copy, the sealed copy of the vault's Secrets in the config directory, with no network within {const:LIFE_MINUTES} minutes of its last Sync. Past that, when the Sync fails (no network, 1Password down), they still answer from the Copy, with one line on stderr, `warning: 1Password could not be synced (<why>); answering from the local copy synced <age> ago`, and try no Sync again for {const:LIFE_MINUTES} minutes. Give `--fresh` right after a Secret was changed on another host. `--fresh` and `mv` always sync first, and fail when the Sync fails. `put` and `rm` sync first too; when that Sync cannot reach 1Password (no network, the rate limit, 1Password down), they go on from the Copy as held, their write waits as below, and stderr also says `1Password could not be reached (<why>); {const:WAITS}`; any other failed Sync refuses. After that Sync, a write 1Password cannot take now (no network, the rate limit, 1Password down) waits, sealed in `{const:PENDING_FILE}` beside the Copy: the command answers `"pending": true`, with one `warning:` line on stderr naming the write, why it waits and the file; every read shows it, and the next Sync that reaches 1Password (any command past the Copy's Life, or `--fresh`) pushes it, each change replayed on the item as it then is: a Field another host changed meanwhile is kept, and one both changed takes this host's value, named in a `warning:` line. Another host sees the write only after that push. Any other refusal of a write is its error, and nothing waits.
 /// - A command that takes a value a person knows waits for it to be submitted on a one-time link, which it prints first: it does not answer until the person submits it, or the link expires. Every other command asks nothing.
 ///
 /// ## Output
@@ -165,7 +165,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It syncs the Copy with the vault first, so it never writes over a stale item, reads the Secret from it, merges into it what this `put` names, and writes it back as one item, only when that changes it: one write, whose answer the Copy keeps. A Field not named is kept. `--set "NAME=value"` sets a Field that is not secret, split on the first `=`, stored as plain text; repeat it. `--field-from-stdin <Label>` sets one Field to all of stdin, one trailing newline dropped, stored concealed: for a secret a command makes and pipes in, such as `openssl rand -base64 32 | optokens put deploy-db --set "Username=svc" --field-from-stdin Password`. `--field-from-pipe <Label>=<(command)` sets a Field to all the command prints, one trailing newline dropped, stored concealed; repeat it to store several generated secrets in one `put`, such as `optokens put deploy-db --set "Username=svc" --field-from-pipe Password=<(openssl rand -base64 32) --field-from-pipe SigningKey=<(openssl rand -hex 32)`. The shell (bash, zsh) runs each command and puts only its pipe's path, `/dev/fd/N`, on the command line; `put` reads each pipe to its end and refuses any path that is not a pipe, a file among them. On Windows, PowerShell has no `<(command)`: the path must be a named pipe, `\\.\pipe\<name>`, or use one `put --field-from-stdin` per value. `--description` replaces the description, the item's notes (`--description ""` clears it); alone, for a stored Secret, it changes nothing else. `--meta '<json>'` replaces the Secret's Meta, structured data about it for a program to read (a Cloudflare `account_id`), one JSON object; a `put` without it keeps the stored one, and alone, for a stored Secret, it changes nothing else. Anything but one JSON object is refused (`bad_meta`). A new Secret is `static` unless `--kind profile`. A Profile's labels are environment variables' names, for `env`. How a Secret is laid out in the vault: [Secrets in the vault](help:secrets).
+    /// It syncs the Copy with the vault first, so it never writes over a stale item, reads the Secret from it, merges into it what this `put` names, and writes it back as one item, only when that changes it: one write, whose answer the Copy keeps. When that Sync cannot reach 1Password, it reads the Secret from the Copy as held instead, and the write waits on this host: see `pending` below. A Field not named is kept. `--set "NAME=value"` sets a Field that is not secret, split on the first `=`, stored as plain text; repeat it. `--field-from-stdin <Label>` sets one Field to all of stdin, one trailing newline dropped, stored concealed: for a secret a command makes and pipes in, such as `openssl rand -base64 32 | optokens put deploy-db --set "Username=svc" --field-from-stdin Password`. `--field-from-pipe <Label>=<(command)` sets a Field to all the command prints, one trailing newline dropped, stored concealed; repeat it to store several generated secrets in one `put`, such as `optokens put deploy-db --set "Username=svc" --field-from-pipe Password=<(openssl rand -base64 32) --field-from-pipe SigningKey=<(openssl rand -hex 32)`. The shell (bash, zsh) runs each command and puts only its pipe's path, `/dev/fd/N`, on the command line; `put` reads each pipe to its end and refuses any path that is not a pipe, a file among them. On Windows, PowerShell has no `<(command)`: the path must be a named pipe, `\\.\pipe\<name>`, or use one `put --field-from-stdin` per value. `--description` replaces the description, the item's notes (`--description ""` clears it); alone, for a stored Secret, it changes nothing else. `--meta '<json>'` replaces the Secret's Meta, structured data about it for a program to read (a Cloudflare `account_id`), one JSON object; a `put` without it keeps the stored one, and alone, for a stored Secret, it changes nothing else. Anything but one JSON object is refused (`bad_meta`). A new Secret is `static` unless `--kind profile`. A Profile's labels are environment variables' names, for `env`. How a Secret is laid out in the vault: [Secrets in the vault](help:secrets).
     ///
     /// ## The one-time link
     ///
@@ -183,7 +183,7 @@ enum Cmd {
     ///
     /// - `secret`: `<service>/<account>`.
     /// - `changed`: whether it wrote; `false` when the Secret already held all it was given.
-    /// - `pending`: `true` when 1Password could not take the write now, so it waits for the next Sync (see `optokens --help`); `false` when 1Password took it, or nothing was written.
+    /// - `pending`: `true` when 1Password could not take the write now, or its Sync could not reach 1Password, so it waits on this host for the next Sync (see `optokens --help`); a value entered on the one-time link waits the same way; `false` when 1Password took it, or nothing was written.
     /// - `kind`: `static` or `profile`.
     /// - `fields`: the Secret's labels now, `null` for a single value.
     ///
@@ -298,7 +298,7 @@ enum Cmd {
     ///
     /// ## What it answers
     ///
-    /// `secrets`, by service, then account, each with `service`, `account`, `kind`, `description` (or `null`), `meta`, the Meta (or `null`), and `fields`, its labels (`null` for a single value):
+    /// `secrets`, by service, then account, each with `service`, `account`, `kind`, `description` (or `null`), `meta`, the Meta (or `null`), and `fields`, its labels (`null` for a single value); and `pending: true` for a Secret whose `put` waits on this host for 1Password (a removal that waits hides its Secret):
     ///
     /// ```json
     /// { "secrets": [ { "service": "glm", "account": "default", "kind": "profile", "description": "Claude Code to GLM", "meta": null, "fields": ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] } ] }
@@ -357,7 +357,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It syncs the Copy with the vault, finds the Secret's item and deletes it for good (not archived): one delete.
+    /// It syncs the Copy with the vault, finds the Secret's item and deletes it for good (not archived): one delete. When the Sync cannot reach 1Password, it finds the Secret in the Copy as held and the delete waits on this host (`optokens --help`).
     ///
     /// ## What it answers
     ///
@@ -461,6 +461,7 @@ pub(crate) fn help() -> Help {
         .constant("LINK_MINUTES", crate::link::LIFETIME.as_secs() / 60)
         .constant("LIFE_MINUTES", crate::store::LIFE.as_secs() / 60)
         .constant("COPY_FILE", crate::store::COPY_FILE)
+        .constant("WAITS", crate::store::WAITS)
         .constant(
             "PENDING_FILE",
             format!("{}.pending", crate::store::COPY_FILE),

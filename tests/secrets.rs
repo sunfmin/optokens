@@ -303,8 +303,18 @@ fn past_its_life_a_read_whose_sync_fails_answers_from_the_copy_with_a_warning() 
     let fresh = run(&host, &["get", "db", "--fresh"]);
     assert_eq!((fresh.code, fresh.stdout.as_str()), (2, ""));
     assert_eq!(kinds(&fresh.error()), ["vault_failed"]);
+    // `mv` syncs first and fails; a `put` goes on from the Copy (decision
+    // record 17), and here its write reaches 1Password: nothing waits.
+    let mv = host.run(&["mv", "db", "db2"], &[TOKEN, STALE], None);
+    assert_eq!(kinds(&mv.json()), ["vault_failed"]);
     let put = host.run(&["put", "db", "--set", "A=2"], &[TOKEN, STALE], None);
-    assert_eq!(kinds(&put.json()), ["vault_failed"]);
+    assert_eq!(
+        (put.code, &put.json()["pending"]),
+        (0, &json!(false)),
+        "{}",
+        put.stderr
+    );
+    assert_eq!(run(&host, &["get", "db", "--field", "A"]).stdout, "2");
 
     let cold = Host::new(
         &[],
@@ -1345,4 +1355,110 @@ fn a_write_the_vault_cannot_take_now_waits_and_the_next_sync_pushes_it() {
     );
     let again = run(&host, &["put", "db", "--set", "A=3"]);
     assert_eq!(again.json()["pending"], false);
+}
+
+/// While 1Password cannot be reached (here its rate limit), `put` and `rm`
+/// are kept on this host as pending writes, answered at once with
+/// `"pending": true`; reads on this host show them, `list` marks them, and
+/// the next command that syncs pushes them, keeping a Field another host
+/// changed meanwhile. A refusal that is not "cannot reach" still fails.
+#[test]
+fn put_and_rm_wait_on_this_host_while_1password_cannot_be_reached() {
+    let host = host();
+    let stale = |args: &[&str]| host.run(args, &[TOKEN, STALE], None);
+    for put in [
+        &["put", "db", "--set", "A=1", "--set", "B=2"][..],
+        &["put", "gone", "--set", "X=1"],
+    ] {
+        assert_eq!(run(&host, put).code, 0);
+    }
+    let mut state = host.state();
+    let limited = json!({ "name": "RateLimitExceeded", "message": "rate limit exceeded" });
+    let methods = [
+        "ItemsList",
+        "ItemsGetAll",
+        "ItemsPut",
+        "ItemsCreateAll",
+        "ItemsDeleteAll",
+    ];
+    state["core"]["fail"] = methods
+        .iter()
+        .map(|m| (m.to_string(), limited.clone()))
+        .collect();
+    host.set_state(&state);
+
+    let line = "1Password could not be reached (";
+    let tail =
+        "); stored on this host and written to the vault by the next command that reaches it";
+    let edit = stale(&["put", "db", "--set", "A=10"]);
+    assert_eq!(edit.code, 0, "{}{}", edit.stdout, edit.stderr);
+    assert_eq!(edit.json()["pending"], true, "{}", edit.stdout);
+    assert!(
+        edit.stderr.contains(line) && edit.stderr.contains(tail),
+        "{}",
+        edit.stderr
+    );
+    let new = host.run(
+        &["put", "new", "--field-from-stdin", "TOKEN"],
+        &[TOKEN, STALE],
+        Some(b"s3cr3t-pending\n"),
+    );
+    assert_eq!(new.code, 0, "{}{}", new.stdout, new.stderr);
+    assert_eq!(new.json()["pending"], true);
+    let rm = stale(&["rm", "gone"]);
+    assert_eq!(rm.code, 0, "{}{}", rm.stdout, rm.stderr);
+    assert_eq!(
+        rm.json(),
+        json!({ "secret": "gone/default", "changed": true, "pending": true })
+    );
+    let bad = stale(&["put", "a/b", "--set", "A=1"]);
+    assert_eq!(kinds(&bad.json()), ["bad_name"]);
+    sealed(&host, &["s3cr3t-pending"]);
+
+    assert_eq!(stale(&["get", "db", "--field", "A"]).stdout, "10");
+    assert_eq!(stale(&["get", "gone"]).code, 2);
+    assert_eq!(
+        stale(&["env", "new"]).stdout,
+        "export TOKEN='s3cr3t-pending'\n"
+    );
+    let listed = stale(&["list"]).json();
+    let marks: Vec<(&str, &Value)> = listed["secrets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| (s["service"].as_str().unwrap(), &s["pending"]))
+        .collect();
+    assert_eq!(marks, [("db", &json!(true)), ("new", &json!(true))]);
+
+    // Another host changes B meanwhile; then 1Password is reachable again.
+    host.change("db", "B", "from-another-host");
+    let mut state = host.state();
+    state["core"]["fail"] = Value::Null;
+    host.set_state(&state);
+    let pushed = stale(&["list"]);
+    assert_eq!(pushed.code, 0, "{}", pushed.stderr);
+    let secrets = pushed.json()["secrets"].clone();
+    assert!(
+        secrets
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|s| s.get("pending").is_none()),
+        "{secrets}"
+    );
+    let items = host.items();
+    let titles: Vec<&Value> = items
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| &i["title"])
+        .collect();
+    assert_eq!(titles, [&json!("db"), &json!("new")]);
+    let db = run(&host, &["get", "db", "--json", "--fresh"]).json();
+    assert_eq!(db["fields"]["A"], "10");
+    assert_eq!(db["fields"]["B"], "from-another-host");
+    assert_eq!(
+        run(&host, &["get", "new", "--field", "TOKEN"]).stdout,
+        "s3cr3t-pending"
+    );
 }

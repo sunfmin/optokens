@@ -141,8 +141,9 @@ fn put_secret(
     let (Some(name), true) = (name, faults.is_empty()) else {
         return Err(faults);
     };
-    // A write is never based on a stale item: the Copy syncs first.
-    let mut store = opened(env, true)?;
+    // The Copy syncs first, so no write is based on a stale item; when
+    // 1Password cannot be reached, the write goes on from the Copy and waits.
+    let mut store = to_write(env)?;
     let found = store.find(&name).map_err(|r| vec![r])?;
     let existing = found.as_ref().map(|f| &f.secret);
     let single = bare && (!annotated || existing.is_none());
@@ -261,7 +262,15 @@ pub fn fresh_link(title: &str, description: Option<&str>, fields: Vec<link::Fiel
     )
 }
 
-/// The vault's Store, synced first when `fresh` (`--fresh`, and before a write).
+/// The vault's Store for `put` and `rm`: synced first, or, when 1Password
+/// cannot be reached, as held, its writes waiting on this host.
+fn to_write(env: &Env) -> Result<Store, Vec<Refusal>> {
+    let mut store = Store::open(env)?;
+    store.sync_to_write().map_err(|r| vec![r])?;
+    Ok(store)
+}
+
+/// The vault's Store, synced first when `fresh` (`--fresh`, and before `mv`).
 fn opened(env: &Env, fresh: bool) -> Result<Store, Vec<Refusal>> {
     let mut store = Store::open(env)?;
     if fresh && let Err(e) = store.sync() {
@@ -329,7 +338,13 @@ pub fn env(env: &Env, service: &str, account: &str, fresh: bool) -> Answer {
 pub fn list(env: &Env, fresh: bool) -> Answer {
     match opened(env, fresh).and_then(|mut store| store.all()) {
         Ok(all) => Answer::json(&json!({
-            "secrets": all.iter().map(|(n, s)| secret::summary(n, s)).collect::<Vec<_>>(),
+            "secrets": all.iter().map(|(n, s, pending)| {
+                let mut summary = secret::summary(n, s);
+                if *pending {
+                    summary["pending"] = json!(true);
+                }
+                summary
+            }).collect::<Vec<_>>(),
         })),
         Err(faults) => Answer::refused(faults),
     }
@@ -369,7 +384,7 @@ pub fn rm(env: &Env, service: &str, account: &str) -> Answer {
     let removed = Name::new(service, account)
         .map_err(|r| vec![r])
         .and_then(|name| {
-            let mut store = opened(env, true)?;
+            let mut store = to_write(env)?;
             let found = store.find(&name).map_err(|r| vec![r])?;
             let mut pending = false;
             if let Some(found) = &found {
