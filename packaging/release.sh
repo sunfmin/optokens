@@ -21,14 +21,6 @@
 #                             Formula/optokens.rb, the manifest to the bucket's
 #                             bucket/optokens.json. Run again, it publishes the
 #                             same again: nothing that is there is in the way.
-#   release.sh op <version>   the tap's formula for the 1Password CLI, `op`,
-#                             which optokens' formula depends on, pinned at
-#                             <version> of 1Password's own release archives:
-#                             fetches each, checks the macOS one says <version>,
-#                             writes its url and sha256 and pushes
-#                             Formula/onepassword-cli.rb. The only way that
-#                             formula changes. (Scoop's main bucket carries
-#                             `op` already, as 1password-cli.)
 #
 # Homebrew and Scoop download from the tap (sunfmin/homebrew-tap) with no
 # login. `gh` must be allowed to write to the tap and the bucket.
@@ -45,15 +37,12 @@ PLATFORMS="macos-arm64 macos-x86_64 linux-arm64 linux-x86_64 windows-x86_64"
 DIST=${DIST:-dist}
 # The one sentence each installer shows.
 DESC="Keeps an agent's secrets in a 1Password vault through a service account"
-# The tap's formula for `op`, and Scoop's (main bucket) manifest for it.
-OP_FORMULA=onepassword-cli
-OP_SCOOP=1password-cli
-OP_DIST=https://cache.agilebits.com/dist/1P/op2/pkg
-# What each installer says once: what optokens needs beyond `op`.
+# What each installer says once: what optokens needs beyond itself (it reaches
+# 1Password with no other program, ADR 0015).
 NOTE="optokens needs tailscale, on a tailnet, for \`put --fields\` and \`init\`: they serve their one-time link on the tailnet only."
 
 usage() {
-    echo "usage: release.sh doctor | check-tag <vX.Y.Z> | dry | cut <vX.Y.Z> | op <version>" >&2
+    echo "usage: release.sh doctor | check-tag <vX.Y.Z> | dry | cut <vX.Y.Z>" >&2
     exit 2
 }
 
@@ -243,8 +232,6 @@ class Optokens < Formula
   homepage "$REPO"
   version "$version"
 
-  depends_on "sunfmin/tap/$OP_FORMULA"
-
   on_macos do
     on_arm do
 $(url_sha macos-arm64)
@@ -287,7 +274,7 @@ manifest() {
     "description": "$DESC",
     "homepage": "$REPO",
     "license": "Proprietary",
-    "depends": ["$OP_SCOOP"],
+
     "architecture": {
         "64bit": {
             "url": "$base/$(archive windows-x86_64)",
@@ -318,84 +305,6 @@ push_file() {
     rm -rf "$clone"
 }
 
-# tap_has_op: the tap holds the formula optokens' formula depends on.
-tap_has_op() {
-    gh api "repos/$TAP/contents/Formula/$OP_FORMULA.rb" --silent 2>/dev/null || {
-        echo "release: $TAP has no Formula/$OP_FORMULA.rb, which optokens' formula depends on:" >&2
-        echo "    packaging/release.sh op <version>   (the newest: https://app-updates.agilebits.com/product_history/CLI2)" >&2
-        exit 1
-    }
-}
-
-# op <version>: the tap's formula for `op` at <version>.
-op() {
-    case "$1" in
-    [0-9]*.[0-9]*.[0-9]*) ;;
-    *) usage ;;
-    esac
-    case "$1" in *[!0-9.]* | *.*.*.*) usage ;; esac
-    command -v gh >/dev/null && command -v ruby >/dev/null || {
-        echo "release: op needs gh and ruby: brew install gh ruby" >&2
-        exit 1
-    }
-    work=$(mktemp -d)
-    trap 'rm -rf "$work"' EXIT
-    for p in darwin_arm64 darwin_amd64 linux_arm64 linux_amd64; do
-        curl -fsSL -o "$work/$p.zip" "$OP_DIST/v$1/op_${p}_v$1.zip" || {
-            echo "release: 1Password has no $OP_DIST/v$1/op_${p}_v$1.zip" >&2
-            exit 1
-        }
-    done
-    unzip -q -d "$work/darwin_arm64" "$work/darwin_arm64.zip" op
-    said=$("$work/darwin_arm64/op" --version)
-    [ "$said" = "$1" ] || {
-        echo "release: op_darwin_arm64_v$1.zip's op --version says '$said', not '$1'" >&2
-        exit 1
-    }
-    op_sha() {
-        printf '      url "%s"\n      sha256 "%s"\n' "$OP_DIST/v$1/op_${2}_v$1.zip" "$(sha "$work/$2.zip")"
-    }
-    cat >"$work/$OP_FORMULA.rb" <<FORMULA
-class OnepasswordCli < Formula
-  desc "1Password CLI, op, from 1Password's own release archives"
-  homepage "https://developer.1password.com/docs/cli"
-  # Written by optokens' packaging/release.sh op <version>; not edited by hand.
-  license :cannot_represent
-
-  on_macos do
-    on_arm do
-$(op_sha "$1" darwin_arm64)
-    end
-    on_intel do
-$(op_sha "$1" darwin_amd64)
-    end
-  end
-  on_linux do
-    on_arm do
-$(op_sha "$1" linux_arm64)
-    end
-    on_intel do
-$(op_sha "$1" linux_amd64)
-    end
-  end
-
-  conflicts_with cask: "1password-cli"
-
-  def install
-    # The zip's quarantine reaches op, and on a Mac nobody watches its first
-    # launch waits forever on a Gatekeeper prompt. op is 1Password-signed.
-    quiet_system "xattr", "-d", "com.apple.quarantine", "op" if OS.mac?
-    bin.install "op"
-  end
-
-  test do
-    assert_equal version.to_s, shell_output("#{bin}/op --version").strip
-  end
-end
-FORMULA
-    ruby -c "$work/$OP_FORMULA.rb" >/dev/null
-    push_file "$TAP" "Formula/$OP_FORMULA.rb" "$work/$OP_FORMULA.rb" "$OP_FORMULA $1"
-}
 
 case "${1:-}" in
 doctor)
@@ -424,11 +333,7 @@ dry)
     echo "release: dry ok ($NAME $version, five platforms, $DIST)"
     exit 0
     ;;
-op)
-    [ $# -eq 2 ] || usage
-    op "$2"
-    exit 0
-    ;;
+
 cut) [ $# -eq 2 ] || usage ;;
 *) usage ;;
 esac
@@ -438,8 +343,7 @@ command -v gh >/dev/null || {
     echo "release: cut publishes with gh: brew install gh" >&2
     exit 1
 }
-# Refused before building: the formula would depend on a formula not there.
-tap_has_op
+
 build "${2#v}"
 release=$NAME-v$version
 archives=$(for p in $PLATFORMS; do echo "$DIST/$(archive "$p")"; done)
