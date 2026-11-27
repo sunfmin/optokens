@@ -120,8 +120,8 @@ fn io_refusal(e: std::io::Error) -> Refusal {
 /// `tailscale <args>`'s stdout, or why it gave none.
 fn ask(tailscale: &Path, args: &[&str], bound: Duration) -> Result<String, String> {
     let mut command = Command::new(tailscale);
-    command.args(args).env_remove(crate::op::TOKEN_ENV);
-    let ran = program::bounded(command, None, bound)?;
+    command.args(args).env_remove(crate::account::TOKEN_ENV);
+    let ran = program::bounded(command, bound)?;
     if ran.status.success() {
         Ok(ran.stdout)
     } else {

@@ -1,10 +1,12 @@
 //! A host for one test of the real binary: a home, a bin directory of
-//! stand-ins (`examples/standin.rs`) placed first on `PATH`, and their state.
+//! stand-ins (`examples/standin.rs`, for `tailscale`) placed first on `PATH`,
+//! and the state they share with the stand-in Core the binary runs on
+//! (`src/standin.rs`), its vault's items as the Core answers them.
 #![allow(dead_code)] // each test file uses part of it
 
 pub mod link;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -77,10 +79,10 @@ impl Host {
     }
 
     /// Each value's field type in the vault's item `title`, by its label:
-    /// `{ "Label": "CONCEALED" }`.
+    /// `{ "Label": "Concealed" }`.
     #[allow(dead_code)] // not every test binary looks at types
     pub fn field_types(&self, title: &str) -> Value {
-        let items = self.state()["op"]["items"].clone();
+        let items = self.items();
         let item = items
             .as_array()
             .unwrap()
@@ -92,13 +94,65 @@ impl Host {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|f| f["section"]["label"] == "fields")
-            .map(|f| (f["label"].as_str().unwrap().to_string(), f["type"].clone()))
+            .filter(|f| f["sectionId"] == "fields")
+            .map(|f| {
+                (
+                    f["title"].as_str().unwrap().to_string(),
+                    f["fieldType"].clone(),
+                )
+            })
             .collect()
+    }
+
+    /// The vault's items, as the Core answers them.
+    pub fn items(&self) -> Value {
+        let items = self.state()["core"]["items"].clone();
+        if items.is_null() { json!([]) } else { items }
     }
 
     pub fn calls(&self) -> Value {
         self.state()["calls"].clone()
+    }
+
+    /// The Core's calls since the last [`Host::forget_calls`], by method.
+    pub fn core_calls(&self) -> Vec<String> {
+        let calls = self.calls();
+        calls
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|c| c["program"] == "core")
+            .map(|c| c["method"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    /// Drops the calls recorded so far.
+    pub fn forget_calls(&self) {
+        let mut state = self.state();
+        state["calls"] = Value::Null;
+        self.set_state(&state);
+    }
+
+    /// Every file under the config directory, with what it holds: for a
+    /// test that no value is in any of them.
+    pub fn config_files(&self) -> Vec<(PathBuf, Vec<u8>)> {
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(self.config())
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            files.push((
+                entry.path(),
+                std::fs::read(entry.path()).unwrap_or_default(),
+            ));
+        }
+        files
+    }
+
+    /// The Copy dropped, as on a host that never synced.
+    pub fn cold(&self) {
+        let _ = std::fs::remove_file(self.config().join("copy"));
     }
 
     pub fn config(&self) -> PathBuf {
@@ -162,4 +216,51 @@ impl Host {
         let ran = self.run(&["doctor"], env, None);
         (ran.code, ran.json())
     }
+}
+
+/// A vault item as the Core answers one optokens wrote, `fields` sorted by
+/// id as the Core sorts them, in the vault `optokens` (`v0`).
+pub fn stored(id: &str, title: &str, tags: Value, fields: Value) -> Value {
+    let mut fields = fields.as_array().unwrap().clone();
+    fields.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+    json!({ "id": id, "title": title, "category": "SecureNote", "vaultId": "v0", "version": 1,
+            "tags": tags, "notes": "", "fields": fields, "websites": [], "files": [],
+            "sections": [{ "id": "fields", "title": "fields" }, { "id": "optokens", "title": "optokens" }, { "id": "", "title": "" }],
+            "createdAt": "t", "updatedAt": "t1" })
+}
+
+/// The `i`th value of the section `fields`, plain text, as optokens and
+/// mytokens write it.
+pub fn value(i: usize, label: &str, value: &str) -> Value {
+    json!({ "id": format!("fields.{i}"), "title": label, "sectionId": "fields", "fieldType": "Text", "value": value })
+}
+
+/// A field of the section `optokens`.
+pub fn meta(label: &str, value: &str) -> Value {
+    json!({ "id": format!("optokens.{label}"), "title": label, "sectionId": "optokens", "fieldType": "Text", "value": value })
+}
+
+impl Host {
+    /// The item `title` changed by another host: its Field `label` set to
+    /// `value`, its version and `updatedAt` raised, as 1Password does.
+    pub fn change(&self, title: &str, label: &str, value: &str) {
+        let mut state = self.state();
+        let items = state["core"]["items"].as_array_mut().unwrap();
+        let item = items.iter_mut().find(|i| i["title"] == title).unwrap();
+        let n = item["version"].as_u64().unwrap() + 1;
+        item["version"] = json!(n);
+        item["updatedAt"] = json!(format!("t{n}"));
+        let fields = item["fields"].as_array_mut().unwrap();
+        let field = fields.iter_mut().find(|f| f["title"] == label).unwrap();
+        field["value"] = json!(value);
+        self.set_state(&state);
+    }
+}
+
+/// What every Sync calls: a sign-in, the vault's id, one list.
+pub const SYNC: [&str; 3] = ["init_client", "VaultsList", "ItemsList"];
+
+/// [`SYNC`] and then `more`.
+pub fn synced(more: &[&str]) -> Vec<String> {
+    SYNC.iter().chain(more).map(|c| c.to_string()).collect()
 }

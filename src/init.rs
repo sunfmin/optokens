@@ -1,6 +1,6 @@
 //! `optokens init`: takes the service account's token on a one-time link,
 //! writes it and the vault's name where every command finds them, then checks
-//! with that token, through `op`, that the service account reads and writes
+//! with that token, through opcore, that the service account reads and writes
 //! the vault.
 
 use crate::account::{self, Env};
@@ -34,15 +34,15 @@ pub const PROBE: &str = "optokens-init-probe";
 /// its refusal's `kind`, and no later check is made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, agent_help::Help)]
 pub enum Check {
-    /// `op vault list` shows the vault: it exists, and the service account has access to it. Fix: create the vault in 1Password if it is not there, and give the service account read and write on it, in 1Password's web UI under Developer → Service Accounts.
+    /// 1Password lists the vault to the service account: it exists, and the service account has access to it. Fix: create the vault in 1Password if it is not there, and give the service account read and write on it, in 1Password's web UI under Developer → Service Accounts.
     VaultListed,
-    /// `op item list` reads the vault's items. Fix: give the service account read on the vault, as for `vault_listed`.
+    /// The service account signs in and lists the vault's items, which the Copy syncs to. Fix: give the service account read on the vault, as for `vault_listed`.
     VaultRead,
-    /// `op item create` writes the probe item `optokens-init-probe`, tagged `optokens` (`op item edit`, over one an earlier `init` left). Fix: give the service account write on the vault, as for `vault_listed`.
+    /// One create writes the probe item `optokens-init-probe`, tagged `optokens` (one edit, over one an earlier `init` left). Fix: give the service account write on the vault, as for `vault_listed`.
     ProbeWritten,
-    /// The probe item, read back, holds what was written. Fix: run `optokens init --check` again.
+    /// The probe item, as 1Password answered the write and the Copy keeps it, holds what was written: no read of the Budget. Fix: run `optokens init --check` again.
     ProbeReadBack,
-    /// `op item delete` removes the probe item. Fix: give the service account write on the vault, as for `vault_listed`.
+    /// One delete removes the probe item for good. Fix: give the service account write on the vault, as for `vault_listed`.
     ProbeRemoved,
 }
 
@@ -61,7 +61,8 @@ fn run(env: &Env, args: InitArgs) -> Result<Value, Vec<Refusal>> {
         account::save(env, &token, args.vault.trim()).map_err(|r| vec![r])?
     };
     let source = token.source.clone();
-    checks(&Store::new(token, vault.name.clone())).map_err(|mut refusal| {
+    let dir = account::config_dir(env).map_err(|r| vec![r])?;
+    checks(&mut Store::new(&token, vault.name.clone(), &dir)).map_err(|mut refusal| {
         if !args.check {
             refusal.fault = format!(
                 "{}; the token file `{}` and the vault file are written and kept, so once it is fixed `optokens init --check` checks again with no new link",
@@ -117,9 +118,10 @@ fn enter(env: &Env, vault: &str) -> Result<String, Vec<Refusal>> {
         .to_string())
 }
 
-/// Each [`Check`] in order, with `store`'s token, until one fails.
-fn checks(store: &Store) -> Result<(), Refusal> {
-    let vault = store.vault();
+/// Each [`Check`] in order, with `store`'s token, until one fails: one
+/// Sync, one create, a read from the Copy, one delete.
+fn checks(store: &mut Store) -> Result<(), Refusal> {
+    let vault = store.vault().to_string();
     let failed = |check: Check, fault: &str| {
         Refusal::of(
             &check,
@@ -130,13 +132,16 @@ fn checks(store: &Store) -> Result<(), Refusal> {
         )
     };
     let by = |check| move |refusal: Refusal| failed(check, &refusal.fault);
-    if !store.has_vault().map_err(by(Check::VaultListed))? {
-        return Err(failed(
-            Check::VaultListed,
-            &format!(
-                "`op vault list` does not show the vault `{vault}`: it does not exist, or the service account has no access to it"
+    if let Err(e) = store.sync() {
+        return Err(match e {
+            opcore::Error::NoVault(_) => failed(
+                Check::VaultListed,
+                &format!(
+                    "1Password lists no vault `{vault}` to the service account: it does not exist, or the service account has no access to it"
+                ),
             ),
-        ));
+            e => failed(Check::VaultRead, &store.refused(e).fault),
+        });
     }
     let probe = Name::new(PROBE, DEFAULT_ACCOUNT).expect("a valid name");
     let left = store.find(&probe).map_err(by(Check::VaultRead))?;
@@ -153,8 +158,8 @@ fn checks(store: &Store) -> Result<(), Refusal> {
     let Some(back) = back.filter(|found| found.secret == secret) else {
         return Err(failed(
             Check::ProbeReadBack,
-            "the probe item read back is not what was written",
+            "the probe item 1Password answered is not what was written",
         ));
     };
-    store.delete(&back.id).map_err(by(Check::ProbeRemoved))
+    store.delete(&back.item.id).map_err(by(Check::ProbeRemoved))
 }

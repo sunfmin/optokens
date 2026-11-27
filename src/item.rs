@@ -1,27 +1,31 @@
-//! How a Secret is laid out as an item of the vault, and read back: pure.
+//! How a Secret is laid out as an item of the vault, and read back: pure,
+//! on opcore's structs (the 1Password SDK's model, `opcore::item`, which
+//! says how each reads in `op`).
 //!
 //! One Secret is one item, titled as [`Name::title`] says and tagged
-//! [`TAG`]. Its values are the fields of the section [`VALUES`], each
-//! labelled with its Field's label ([`SINGLE`] for a single value) and typed
-//! by its visibility ([`CONCEALED`] or [`STRING`]); its service, account,
-//! kind, shape and Meta (compact JSON, [`META_FIELD`]) are the fields of the
-//! section [`META`]; its Description is the item's notes ([`NOTES`]), what
-//! 1Password shows under the title in its list. The
-//! name is read from that section, never from the title; an item an earlier
-//! optokens wrote, titled `<service>/<account>` without them, is read by its
-//! title. An item that is not this shape is refused by name, never guessed at;
-//! its other tags, sections and fields are another program's, read past and
-//! kept by [`template`] over the stored item.
+//! [`TAG`]. Its values are the fields of the section [`VALUES`], each titled
+//! with its Field's label ([`SINGLE`] for a single value) and typed by its
+//! visibility (`Concealed` or `Text`, `op`'s [`CONCEALED`] and [`STRING`]);
+//! its service, account, kind, shape and Meta (compact JSON, [`META_FIELD`])
+//! are the fields of the section [`META`]; its Description is the item's
+//! notes, what 1Password shows under the title in its list. The name is read
+//! from that section, never from the title; an item an earlier optokens
+//! wrote, titled `<service>/<account>` without them, is read by its title. An
+//! item that is not this shape is refused by name, never guessed at; its
+//! other tags, sections and fields are another program's, read past and kept
+//! by [`template`] over the stored item. Items `op`, mytokens and optokens
+//! wrote read the same.
 
 use crate::refusal::Refusal;
 use crate::secret::Visibility::{Concealed, Plain};
 use crate::secret::{Fault, Field, Kind, Name, Secret, Values};
-use serde_json::{Map, Value, json};
+use opcore::{Category, FieldType, Item, ItemField, ItemParams, ItemSection, Listed};
+use serde_json::Value;
 
 /// The tag on every item optokens writes.
 pub const TAG: &str = "optokens";
 /// The item's category: one with no fields of its own to fill.
-pub const CATEGORY: &str = "SECURE_NOTE";
+pub const CATEGORY: Category = Category::SecureNote;
 /// The section of the Secret's values.
 pub const VALUES: &str = "fields";
 /// The section of what optokens knows of the Secret.
@@ -41,26 +45,27 @@ pub const SHAPE_SINGLE: &str = "value";
 pub const SHAPE_FIELDS: &str = "fields";
 /// The label of a single value's one field in [`VALUES`].
 pub const SINGLE: &str = "value";
-/// The field types: a concealed value, shown like a password, and plain text.
+/// The field types as `op` and 1Password's own apps name them: a concealed
+/// value, shown like a password (`FieldType::Concealed`), and plain text
+/// (`FieldType::Text`).
 pub const CONCEALED: &str = "CONCEALED";
 pub const STRING: &str = "STRING";
-/// The `purpose` of the item's notes field, which holds the Description.
-pub const NOTES: &str = "NOTES";
-/// The id and label 1Password gives the notes field.
-pub const NOTES_ID: &str = "notesPlain";
 
-/// The item template that `op item create` and `op item edit` read on stdin:
-/// over `stored`, the item as `op` printed it, it keeps what optokens does
-/// not own (every tag, section and field beside [`TAG`], [`VALUES`],
-/// [`META`] and the notes), as an edit template replaces the whole item.
-pub fn template(name: &Name, secret: &Secret, stored: Option<&Value>) -> Value {
-    let field = |section: &str, id: String, visibility, label: &str, value: &str| {
-        let kind = if visibility == Plain {
-            STRING
-        } else {
-            CONCEALED
-        };
-        json!({ "id": id, "section": { "id": section }, "type": kind, "label": label, "value": value })
+/// The item a `put` writes, made or edited: over `stored`, the item as the
+/// vault holds it, it keeps what optokens does not own (every tag, section
+/// and field beside [`TAG`], [`VALUES`] and [`META`]), as an edit replaces
+/// the item's tags, sections, fields and notes whole.
+pub fn template(name: &Name, secret: &Secret, stored: Option<&Item>) -> ItemParams {
+    let field = |section: &str, id: String, visibility, label: &str, value: &str| ItemField {
+        id,
+        title: label.into(),
+        section_id: Some(section.into()),
+        field_type: match visibility {
+            Plain => FieldType::Text,
+            Concealed => FieldType::Concealed,
+        },
+        value: value.into(),
+        ..Default::default()
     };
     let single;
     let (shape, values) = match &secret.values {
@@ -70,19 +75,11 @@ pub fn template(name: &Name, secret: &Secret, stored: Option<&Value>) -> Value {
         }
         Values::Fields(fields) => (SHAPE_FIELDS, &fields[..]),
     };
-    let notes = secret.description.as_deref().unwrap_or_default();
-    let mut fields = vec![
-        json!({ "id": NOTES_ID, "type": STRING, "purpose": NOTES, "label": NOTES_ID, "value": notes }),
-    ];
-    fields.extend(values.iter().enumerate().map(|(i, f)| {
-        field(
-            VALUES,
-            format!("{VALUES}.{i}"),
-            f.visibility,
-            &f.label,
-            &f.value,
-        )
-    }));
+    let mut fields: Vec<ItemField> = values
+        .iter()
+        .enumerate()
+        .map(|(i, f)| field(VALUES, value_id(i), f.visibility, &f.label, &f.value))
+        .collect();
     let data = secret
         .meta
         .as_ref()
@@ -99,114 +96,117 @@ pub fn template(name: &Name, secret: &Secret, stored: Option<&Value>) -> Value {
             .flatten()
             .map(|(l, v)| field(META, format!("{META}.{l}"), Plain, l, v)),
     );
-    let mut tags = vec![json!(TAG)];
-    let mut sections = vec![
-        json!({ "id": VALUES, "label": VALUES }),
-        json!({ "id": META, "label": META }),
-    ];
+    let mut tags = vec![TAG.to_string()];
+    let section = |id: &str| ItemSection {
+        id: id.into(),
+        title: id.into(),
+    };
+    let mut sections = vec![section(VALUES), section(META)];
     if let Some(stored) = stored {
-        let all = |key: &str| stored[key].as_array().into_iter().flatten();
-        tags.extend(all("tags").filter(|t| *t != TAG).cloned());
-        let ours = |label: Option<&str>| label.is_some_and(|l| [VALUES, META].contains(&l));
+        tags.extend(stored.tags.iter().filter(|t| *t != TAG).cloned());
+        let ours = |s: Option<&str>| s.is_some_and(|s| [VALUES, META].contains(&s));
+        // 1Password's unnamed section (id `""`) is its own: it adds it again.
         sections.extend(
-            all("sections")
-                .filter(|s| !ours(s["label"].as_str()))
+            stored
+                .sections
+                .iter()
+                .filter(|s| !s.id.is_empty() && !ours(Some(label(s))))
                 .cloned(),
         );
-        let labels = section_labels(stored);
         fields.extend(
-            all("fields")
-                .filter(|f| !ours(section_of(f, &labels)) && !is_notes(f))
+            stored
+                .fields
+                .iter()
+                .filter(|f| !ours(section_of(f, stored)))
                 .cloned(),
         );
     }
-    json!({
-        "title": name.title(),
-        "category": CATEGORY,
-        "tags": tags,
-        "sections": sections,
-        "fields": fields,
-    })
-}
-
-/// Whether `field` is the item's notes.
-fn is_notes(field: &Value) -> bool {
-    field["purpose"] == NOTES
-}
-
-/// Each section's label by its id, as op names a field's section by either.
-fn section_labels(item: &Value) -> Map<String, Value> {
-    item["sections"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|s| Some((s["id"].as_str()?.to_string(), s["label"].clone())))
-        .collect()
-}
-
-/// The label of `field`'s section; `None` for the category's own fields.
-fn section_of<'a>(field: &'a Value, labels: &'a Map<String, Value>) -> Option<&'a str> {
-    let section = &field["section"];
-    if section.is_null() {
-        return None;
+    ItemParams {
+        category: CATEGORY,
+        title: name.title(),
+        fields,
+        sections,
+        notes: secret.description.clone().unwrap_or_default(),
+        tags,
     }
-    Some(
-        section["label"]
-            .as_str()
-            .or_else(|| labels.get(section["id"].as_str()?)?.as_str())
-            .unwrap_or_default(),
+}
+
+/// The id of the `i`th value's field. The Core answers fields sorted by id,
+/// so [`read`] puts them back in this order by `i`.
+fn value_id(i: usize) -> String {
+    format!("{VALUES}.{i}")
+}
+
+/// A section's name: its title, or its id when it has none (as `op` names
+/// a field's section by either).
+fn label(section: &ItemSection) -> &str {
+    if section.title.is_empty() {
+        &section.id
+    } else {
+        &section.title
+    }
+}
+
+/// The name of `field`'s section in `item`; `None` for a field in none.
+fn section_of<'a>(field: &'a ItemField, item: &'a Item) -> Option<&'a str> {
+    let id = field.section_id.as_deref().filter(|id| !id.is_empty())?;
+    Some(item.sections.iter().find(|s| s.id == id).map_or(id, label))
+}
+
+/// The refusal of the item `title`, which is not optokens' layout, `why`.
+fn not_optokens(title: &str, why: &str) -> Refusal {
+    Refusal::of(
+        &Fault::NotOptokens,
+        format!("the vault's item `{title}` is not a Secret optokens wrote: {why}"),
+        format!(
+            "rename or move the item `{title}` in 1Password, or delete it there if it is one optokens wrote and then changed"
+        ),
     )
 }
 
-/// The Secret an item holds, as `op item get --format json` prints it.
-/// Refused, naming the item, when it is not optokens' layout.
-pub fn read(item: &Value) -> Result<(Name, Secret), Refusal> {
-    let title = item["title"].as_str().unwrap_or_default();
-    layout(item).map_err(|why| {
-        Refusal::of(
-            &Fault::NotOptokens,
-            format!("the vault's item `{title}` is not a Secret optokens wrote: {why}"),
-            format!("rename or move the item `{title}` in 1Password, or delete it there if it is one optokens wrote and then changed"),
-        )
-    })
+/// The Secret an item holds. Refused, naming the item, when it is not
+/// optokens' layout.
+pub fn read(item: &Item) -> Result<(Name, Secret), Refusal> {
+    layout(item).map_err(|why| not_optokens(&item.title, &why))
 }
 
-fn layout(item: &Value) -> Result<(Name, Secret), String> {
-    let title = item["title"].as_str().unwrap_or_default();
-    if !tagged(item) {
+fn layout(item: &Item) -> Result<(Name, Secret), String> {
+    if !item.tags.iter().any(|t| t == TAG) {
         return Err(format!("it has no tag `{TAG}`"));
     }
-    let labels = section_labels(item);
-    let (mut values, mut meta, mut notes) = (Vec::new(), Vec::new(), None);
-    for field in item["fields"].as_array().ok_or("it has no fields")? {
-        if is_notes(field) {
-            notes = field["value"].as_str();
-        }
+    let (mut values, mut meta) = (Vec::new(), Vec::new());
+    for field in &item.fields {
         // The category's own fields, and a section another program keeps
         // (mytokens'), are never optokens': read past, kept by a `put`.
-        let Some(section) = section_of(field, &labels) else {
-            continue;
-        };
-        let label = field["label"].as_str().unwrap_or_default().to_string();
-        // op leaves `value` out of a field that is empty.
-        let value = field["value"].as_str().unwrap_or_default().to_string();
-        match section {
-            VALUES => {
-                let visibility = match field["type"].as_str() {
-                    Some(CONCEALED) => Concealed,
-                    Some(STRING) => Plain,
+        let label = field.title.clone();
+        match section_of(field, item) {
+            Some(VALUES) => {
+                let visibility = match field.field_type {
+                    FieldType::Concealed => Concealed,
+                    FieldType::Text => Plain,
                     other => {
                         return Err(format!(
                             "its field `{label}` in section `{VALUES}` is of type {other:?}, neither `{CONCEALED}` nor `{STRING}`"
                         ));
                     }
                 };
-                values.push(Field::new(&label, &value, visibility))
+                values.push((&field.id, Field::new(&label, &field.value, visibility)))
             }
-            META => meta.push((label, value)),
+            Some(META) => meta.push((label, field.value.clone())),
             _ => {}
         }
     }
+    // In the order they were written, which the Core's (by id) is not past
+    // ten; fields another program wrote without optokens' ids keep its order.
+    let index = |id: &str| {
+        id.strip_prefix(&format!("{VALUES}."))?
+            .parse::<usize>()
+            .ok()
+    };
+    if values.iter().all(|(id, _)| index(id).is_some()) {
+        values.sort_by_key(|(id, _)| index(id));
+    }
+    let values: Vec<Field> = values.into_iter().map(|(_, f)| f).collect();
     let one = |key: &str| -> Result<Option<String>, String> {
         let mut found = meta.iter().filter(|(l, _)| l == key);
         let first = found.next().map(|(_, v)| v.clone());
@@ -224,7 +224,7 @@ fn layout(item: &Value) -> Result<(Name, Secret), String> {
         (Some(service), Some(account)) => Name::new(&service, &account).map_err(|_| {
             format!("its `{SERVICE}` `{service}` and `{ACCOUNT}` `{account}` are not a Secret's name")
         })?,
-        (None, None) => Name::from_old_title(title).ok_or(format!(
+        (None, None) => Name::from_old_title(&item.title).ok_or(format!(
             "its section `{META}` has no `{SERVICE}` and `{ACCOUNT}`, and its title is not `<service>/<account>`"
         ))?,
         _ => return Err(format!("its section `{META}` has one of `{SERVICE}` and `{ACCOUNT}` without the other")),
@@ -234,9 +234,8 @@ fn layout(item: &Value) -> Result<(Name, Secret), String> {
         .map_err(|_| format!("its `{KIND}` is `{kind}`, neither static nor profile"))?;
     // An item an earlier layout wrote keeps it in the section: that one is
     // what optokens (or mytokens) last wrote, the notes another program's.
-    let description = one(DESCRIPTION)?
-        .filter(|d| !d.is_empty())
-        .or_else(|| notes.filter(|n| !n.is_empty()).map(String::from));
+    let notes = Some(item.notes.clone()).filter(|n| !n.is_empty());
+    let description = one(DESCRIPTION)?.filter(|d| !d.is_empty()).or(notes);
     // An item written before Meta has no field of it: a Secret with none.
     let meta = match one(META_FIELD)? {
         None => None,
@@ -284,30 +283,26 @@ fn layout(item: &Value) -> Result<(Name, Secret), String> {
     ))
 }
 
-fn tagged(item: &Value) -> bool {
-    item["tags"]
-        .as_array()
-        .is_some_and(|tags| tags.iter().any(|t| t == TAG))
-}
-
-/// The ids of the items among `op item list --format json`'s summaries that
-/// may hold `name`'s Secret: those titled [`Name::title`] or
-/// its earlier title, `<service>/<account>`. Which one does is for [`read`] to say, as another
+/// The items among `items`, optokens' (tagged [`TAG`]), that may hold
+/// `name`'s Secret: those titled [`Name::title`] or its earlier title,
+/// `<service>/<account>`. Which one does is for [`read`] to say, as another
 /// Secret's title may be the same (`a.b` is `a.b/default` and `a/b`). An item
-/// of either title without the tag is refused.
-pub fn candidates(summaries: &Value, name: &Name) -> Result<Vec<String>, Refusal> {
+/// of either title among `others`, the vault's items without the tag, is
+/// refused.
+pub fn candidates<'a>(
+    items: &'a [Item],
+    others: &[Listed],
+    name: &Name,
+) -> Result<Vec<&'a Item>, Refusal> {
     let titles = [name.title(), name.to_string()];
-    let mut ids = Vec::new();
-    for item in summaries.as_array().into_iter().flatten() {
-        if !titles.iter().any(|t| item["title"] == t.as_str()) {
-            continue;
-        }
-        if !tagged(item) {
-            return Err(read(item).expect_err("an item without the tag is refused"));
-        }
-        ids.push(item["id"].as_str().unwrap_or_default().to_string());
+    let titled = |title: &str| titles.iter().any(|t| t == title);
+    if let Some(other) = others.iter().find(|o| titled(&o.title)) {
+        return Err(not_optokens(
+            &other.title,
+            &format!("it has no tag `{TAG}`"),
+        ));
     }
-    Ok(ids)
+    Ok(items.iter().filter(|i| titled(&i.title)).collect())
 }
 
 /// Refused when more than one item, `ids`, holds `name`'s Secret.
@@ -332,39 +327,34 @@ pub fn unique(name: &Name, ids: &[&str]) -> Result<(), Refusal> {
 /// Whether `item`, read as `name`'s, is in this optokens' layout: titled
 /// [`Name::title`], its name in [`META`], no [`DESCRIPTION`] there. `put`
 /// rewrites one that is not.
-pub fn current(item: &Value, name: &Name) -> bool {
-    let has = |label: &str| {
-        item["fields"].as_array().into_iter().flatten().any(|f| {
-            f["label"] == label && (f["section"]["label"] == META || f["section"]["id"] == META)
-        })
+pub fn current(item: &Item, name: &Name) -> bool {
+    let has = |title: &str| {
+        item.fields
+            .iter()
+            .any(|f| f.title == title && section_of(f, item) == Some(META))
     };
-    item["title"] == name.title().as_str() && has(SERVICE) && has(ACCOUNT) && !has(DESCRIPTION)
+    item.title == name.title() && has(SERVICE) && has(ACCOUNT) && !has(DESCRIPTION)
 }
-
-/// The ids of the items optokens wrote, by their tag.
-pub fn ours(summaries: &Value) -> Vec<String> {
-    summaries
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|item| tagged(item))
-        .map(|item| item["id"].as_str().unwrap_or_default().to_string())
-        .collect()
-}
-
-// What `op` keeps of a template, as the stand-in keeps it: for the round trip.
-#[cfg(test)]
-#[path = "../examples/standin/keep.rs"]
-mod standin;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use serde_json::{Map, json};
 
-    /// The item as `op` keeps it.
-    fn stored(template: &Value) -> Value {
-        super::standin::keep(template, "abc123", "optokens")
+    /// The item as the Core keeps it.
+    fn stored(template: &ItemParams) -> Item {
+        crate::standin::keep(template, "abc123", "v", 1)
+    }
+
+    /// The field titled `title`, of the section `section`, in `item`.
+    fn field<'a>(item: &'a mut Item, section: &str, title: &str) -> &'a mut ItemField {
+        let at = item
+            .fields
+            .iter()
+            .position(|f| f.title == title && f.section_id.as_deref() == Some(section))
+            .unwrap_or_else(|| panic!("no field {section}.{title}"));
+        &mut item.fields[at]
     }
 
     fn secret() -> (Name, Secret) {
@@ -387,22 +377,23 @@ mod tests {
     #[test]
     fn the_template_is_one_tagged_item_with_values_and_metadata_in_their_sections() {
         let (name, secret) = secret();
+        let f = |section: &str, id: &str, kind: &str, title: &str, value: &str| json!({ "id": id, "title": title, "sectionId": section, "fieldType": kind, "value": value });
         assert_eq!(
-            template(&name, &secret, None),
+            serde_json::to_value(template(&name, &secret, None)).unwrap(),
             json!({
                 "title": "aws.ci",
-                "category": "SECURE_NOTE",
+                "category": "SecureNote",
                 "tags": ["optokens"],
-                "sections": [{ "id": "fields", "label": "fields" }, { "id": "optokens", "label": "optokens" }],
+                "sections": [{ "id": "fields", "title": "fields" }, { "id": "optokens", "title": "optokens" }],
+                "notes": "CI deploy",
                 "fields": [
-                    { "id": "notesPlain", "type": "STRING", "purpose": "NOTES", "label": "notesPlain", "value": "CI deploy" },
-                    { "id": "fields.0", "section": { "id": "fields" }, "type": "STRING", "label": "Access Key ID", "value": "AKIA" },
-                    { "id": "fields.1", "section": { "id": "fields" }, "type": "CONCEALED", "label": "Secret", "value": "s" },
-                    { "id": "optokens.service", "section": { "id": "optokens" }, "type": "STRING", "label": "service", "value": "aws" },
-                    { "id": "optokens.account", "section": { "id": "optokens" }, "type": "STRING", "label": "account", "value": "ci" },
-                    { "id": "optokens.kind", "section": { "id": "optokens" }, "type": "STRING", "label": "kind", "value": "static" },
-                    { "id": "optokens.shape", "section": { "id": "optokens" }, "type": "STRING", "label": "shape", "value": "fields" },
-                    { "id": "optokens.meta", "section": { "id": "optokens" }, "type": "STRING", "label": "meta", "value": r#"{"n":[1],"region":"us-east-1"}"# },
+                    f("fields", "fields.0", "Text", "Access Key ID", "AKIA"),
+                    f("fields", "fields.1", "Concealed", "Secret", "s"),
+                    f("optokens", "optokens.service", "Text", "service", "aws"),
+                    f("optokens", "optokens.account", "Text", "account", "ci"),
+                    f("optokens", "optokens.kind", "Text", "kind", "static"),
+                    f("optokens", "optokens.shape", "Text", "shape", "fields"),
+                    f("optokens", "optokens.meta", "Text", "meta", r#"{"n":[1],"region":"us-east-1"}"#),
                 ],
             })
         );
@@ -427,33 +418,48 @@ mod tests {
     }
 
     #[test]
+    fn eleven_fields_and_more_read_back_in_the_order_they_were_written() {
+        let name = Name::new("many", "default").unwrap();
+        let labels: Vec<String> = (0..12).map(|i| format!("L{}", 11 - i)).collect();
+        let secret = Secret {
+            kind: Kind::Profile,
+            description: None,
+            meta: None,
+            values: Values::Fields(labels.iter().map(|l| Field::new(l, l, Plain)).collect()),
+        };
+        let item = stored(&template(&name, &secret, None));
+        assert_eq!(item.fields[0].id, "fields.0");
+        assert_eq!(item.fields[2].id, "fields.10", "the Core sorts by id");
+        assert_eq!(read(&item).unwrap(), (name, secret));
+    }
+
+    #[test]
     fn an_item_not_in_optokens_layout_is_refused_by_name() {
         let (name, secret) = secret();
         let good = stored(&template(&name, &secret, None));
-        let why = |edit: &dyn Fn(&mut Value)| {
+        let why = |edit: &dyn Fn(&mut Item)| {
             let mut item = good.clone();
             edit(&mut item);
             let refused = read(&item).unwrap_err();
             assert_eq!(refused.kind, Some("not_optokens"));
-            let title = item["title"].as_str().unwrap();
             assert!(
                 refused
                     .fix
-                    .starts_with(&format!("rename or move the item `{title}`")),
+                    .starts_with(&format!("rename or move the item `{}`", item.title)),
                 "{refused:?}"
             );
             refused.fault
         };
         assert_eq!(
-            why(&|i| i["tags"] = json!([])),
+            why(&|i| i.tags.clear()),
             "the vault's item `aws.ci` is not a Secret optokens wrote: it has no tag `optokens`"
         );
         assert!(
-            why(&|i| i["fields"][5]["value"] = json!("parent"))
+            why(&|i| field(i, META, KIND).value = "parent".into())
                 .ends_with("its `kind` is `parent`, neither static nor profile")
         );
         assert!(
-            why(&|i| i["fields"][6]["value"] = json!("value"))
+            why(&|i| field(i, META, SHAPE).value = "value".into())
                 .ends_with("its section `fields` is not one field `value`")
         );
         let single = Secret {
@@ -463,7 +469,7 @@ mod tests {
             values: Values::Single("v".into()),
         };
         let mut renamed = stored(&template(&name, &single, None));
-        renamed["fields"][1]["label"] = json!("Token");
+        field(&mut renamed, VALUES, SINGLE).title = "Token".into();
         assert!(
             read(&renamed)
                 .unwrap_err()
@@ -471,36 +477,30 @@ mod tests {
                 .ends_with("its section `fields` is not one field `value`")
         );
         assert!(
-            why(&|i| i["fields"][5]["label"] = json!("level"))
+            why(&|i| field(i, META, KIND).title = "level".into())
                 .ends_with("its section `optokens` has a field `level`")
         );
-        assert!(why(&|i| i["fields"][2]["type"] = json!("URL")).ends_with(
-            "its field `Secret` in section `fields` is of type Some(\"URL\"), neither `CONCEALED` nor `STRING`"
-        ));
         assert!(
-            why(&|i| {
-                i["fields"][1].as_object_mut().unwrap().remove("type");
-            })
-            .ends_with("is of type None, neither `CONCEALED` nor `STRING`")
+            why(&|i| field(i, VALUES, "Secret").field_type = FieldType::Url).ends_with(
+                "its field `Secret` in section `fields` is of type Url, neither `CONCEALED` nor `STRING`"
+            )
         );
         assert!(
-            why(&|i| i["fields"][2]["label"] = json!("Access Key ID"))
+            why(&|i| field(i, VALUES, "Secret").title = "Access Key ID".into())
                 .ends_with("has the label `Access Key ID` empty or twice")
         );
         assert!(
-            why(&|i| {
-                i["fields"].as_array_mut().unwrap().remove(4);
-            })
-            .ends_with("has one of `service` and `account` without the other")
+            why(&|i| i.fields.retain(|f| f.title != ACCOUNT))
+                .ends_with("has one of `service` and `account` without the other")
         );
         for data in ["[1]", "{", "\"s\""] {
             assert!(
-                why(&|i| i["fields"][7]["value"] = json!(data))
+                why(&|i| field(i, META, META_FIELD).value = data.into())
                     .ends_with("its `meta` is not a JSON object")
             );
         }
         assert!(
-            why(&|i| i["fields"][3]["value"] = json!("a/b"))
+            why(&|i| field(i, META, SERVICE).value = "a/b".into())
                 .ends_with("its `service` `a/b` and `account` `ci` are not a Secret's name")
         );
     }
@@ -509,86 +509,86 @@ mod tests {
     fn a_put_over_an_item_keeps_the_tags_sections_and_fields_optokens_does_not_own() {
         let (name, secret) = secret();
         let mut item = stored(&template(&name, &secret, None));
-        item["tags"] = json!(["mytokens", "optokens", "mytokens-digest-abc"]);
-        item["sections"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!({ "id": "m", "label": "mytokens" }));
-        let theirs = json!({ "id": "m.origin", "section": { "id": "m" }, "type": "STRING", "label": "origin", "value": "laptop" });
-        item["fields"].as_array_mut().unwrap().push(theirs.clone());
+        item.tags = ["mytokens", "optokens", "mytokens-digest-abc"]
+            .map(String::from)
+            .to_vec();
+        item.sections.push(ItemSection {
+            id: "m".into(),
+            title: "mytokens".into(),
+        });
+        let theirs = ItemField {
+            id: "m.origin".into(),
+            title: "origin".into(),
+            section_id: Some("m".into()),
+            value: "laptop".into(),
+            ..Default::default()
+        };
+        item.fields.push(theirs.clone());
         assert_eq!(
             read(&item).unwrap(),
             (name.clone(), secret.clone()),
             "a section optokens does not know is read past"
         );
         let over = template(&name, &secret, Some(&item));
+        assert_eq!(over.tags, ["optokens", "mytokens", "mytokens-digest-abc"]);
         assert_eq!(
-            over["tags"],
-            json!(["optokens", "mytokens", "mytokens-digest-abc"])
+            over.sections[2..],
+            [ItemSection {
+                id: "m".into(),
+                title: "mytokens".into()
+            }],
+            "1Password's unnamed section is not sent back"
         );
-        assert_eq!(
-            over["sections"][2],
-            json!({ "id": "m", "label": "mytokens" })
-        );
-        assert_eq!(over["sections"].as_array().unwrap().len(), 3);
-        let fields = over["fields"].as_array().unwrap();
-        let fresh = template(&name, &secret, None)["fields"].clone();
-        assert_eq!(
-            fields[..fields.len() - 1],
-            fresh.as_array().unwrap()[..],
-            "the notes are optokens' own, the Description"
-        );
-        assert_eq!(fields[fields.len() - 1], theirs);
+        let fresh = template(&name, &secret, None).fields;
+        assert!(over.fields[..fresh.len()] == fresh[..]);
+        assert!(over.fields[fresh.len()..] == [theirs]);
+        assert_eq!(over.notes, "CI deploy", "the notes are optokens' own");
         assert_eq!(read(&stored(&over)).unwrap(), (name, secret));
     }
 
     #[test]
-    fn a_field_naming_its_section_by_id_alone_is_read_and_rewritten_as_optokens() {
+    fn a_section_named_by_its_id_or_by_its_title_alone_is_optokens() {
         let (name, secret) = secret();
-        let mut item = stored(&template(&name, &secret, None));
-        for f in item["fields"].as_array_mut().unwrap() {
-            if let Some(section) = f["section"].as_object_mut() {
-                section.remove("label");
+        let laid = stored(&template(&name, &secret, None));
+        let mut untitled = laid.clone();
+        for s in &mut untitled.sections {
+            s.title.clear();
+        }
+        let mut opaque = laid.clone();
+        for s in opaque.sections.iter_mut().filter(|s| !s.id.is_empty()) {
+            s.id = format!("x7k2-{}", s.title);
+        }
+        for f in &mut opaque.fields {
+            if let Some(id) = f.section_id.as_mut().filter(|id| !id.is_empty()) {
+                *id = format!("x7k2-{id}");
             }
         }
-        assert_eq!(read(&item).unwrap(), (name.clone(), secret.clone()));
-        assert_eq!(
-            template(&name, &secret, Some(&item)),
-            template(&name, &secret, None),
-            "optokens' own fields are rewritten, not kept twice"
-        );
+        for item in [untitled, opaque] {
+            assert_eq!(read(&item).unwrap(), (name.clone(), secret.clone()));
+            assert!(current(&item, &name));
+            assert!(
+                template(&name, &secret, Some(&item)) == template(&name, &secret, None),
+                "optokens' own fields are rewritten, not kept twice"
+            );
+        }
     }
 
     #[test]
     fn the_description_is_the_notes_and_none_is_empty_notes() {
         let (name, secret) = secret();
-        let notes = |item: &Value| {
-            let notes: Vec<&Value> = item["fields"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|f| f["purpose"] == NOTES)
-                .collect();
-            assert_eq!(notes.len(), 1, "one notes field: {item}");
-            notes[0]["value"].clone()
-        };
         let laid = template(&name, &secret, None);
-        assert_eq!(notes(&laid), "CI deploy");
+        assert_eq!(laid.notes, "CI deploy");
         assert!(
-            !laid["fields"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|f| f["label"] == DESCRIPTION),
+            !laid.fields.iter().any(|f| f.title == DESCRIPTION),
             "no `description` in the section `optokens`"
         );
         let bare = Secret {
             description: None,
             ..secret.clone()
         };
-        assert_eq!(notes(&template(&name, &bare, None)), "");
+        assert_eq!(template(&name, &bare, None).notes, "");
         let mut noted = stored(&template(&name, &bare, None));
-        noted["fields"][0]["value"] = json!("line one\nline two");
+        noted.notes = "line one\nline two".into();
         assert_eq!(
             read(&noted).unwrap().1.description.as_deref(),
             Some("line one\nline two"),
@@ -598,12 +598,17 @@ mod tests {
 
     /// An item in the layout before the notes: its Description a field
     /// `description` of the section `optokens`, its notes `notes`.
-    fn sectioned(name: &Name, secret: &Secret, notes: &str) -> Value {
+    fn sectioned(name: &Name, secret: &Secret, notes: &str) -> Item {
         let mut item = stored(&template(name, secret, None));
-        let fields = item["fields"].as_array_mut().unwrap();
-        fields[0]["value"] = json!(notes);
+        item.notes = notes.into();
         if let Some(d) = &secret.description {
-            fields.push(json!({ "id": "optokens.description", "section": { "id": META, "label": META }, "type": STRING, "label": DESCRIPTION, "value": d }));
+            item.fields.push(ItemField {
+                id: "optokens.description".into(),
+                title: DESCRIPTION.into(),
+                section_id: Some(META.into()),
+                value: d.clone(),
+                ..Default::default()
+            });
         }
         item
     }
@@ -616,7 +621,7 @@ mod tests {
             assert_eq!(read(&item).unwrap(), (name.clone(), secret.clone()));
             assert!(!current(&item, &name), "a `put` rewrites it");
             let over = template(&name, &secret, Some(&item));
-            assert_eq!(over, template(&name, &secret, None));
+            assert!(over == template(&name, &secret, None));
             assert_eq!(
                 read(&stored(&over)).unwrap(),
                 (name.clone(), secret.clone())
@@ -639,13 +644,13 @@ mod tests {
 
     /// An item as an earlier optokens wrote it: titled `<service>/<account>`,
     /// no name in its section.
-    fn old(name: &Name, secret: &Secret) -> Value {
+    fn old(name: &Name, secret: &Secret) -> Item {
         let mut item = stored(&template(name, secret, None));
-        item["title"] = json!(name.to_string());
-        item["fields"]
-            .as_array_mut()
-            .unwrap()
-            .retain(|f| f["label"] != SERVICE && f["label"] != ACCOUNT);
+        item.title = name.to_string();
+        item.fields.retain(|f| {
+            !(f.section_id.as_deref() == Some(META)
+                && [SERVICE, ACCOUNT].contains(&f.title.as_str()))
+        });
         item
     }
 
@@ -654,7 +659,7 @@ mod tests {
         let (_, secret) = secret();
         let dotted = Name::new("name.com", "default").unwrap();
         let item = stored(&template(&dotted, &secret, None));
-        assert_eq!(item["title"], "name.com");
+        assert_eq!(item.title, "name.com");
         assert_eq!(read(&item).unwrap(), (dotted.clone(), secret.clone()));
         assert!(current(&item, &dotted));
         let account = Name::new("name", "com").unwrap();
@@ -666,73 +671,68 @@ mod tests {
     fn an_item_an_earlier_optokens_wrote_is_read_by_its_title_and_is_not_current() {
         let (name, secret) = secret();
         let item = old(&name, &secret);
-        assert_eq!(item["title"], "aws/ci");
+        assert_eq!(item.title, "aws/ci");
         assert_eq!(read(&item).unwrap(), (name.clone(), secret.clone()));
         assert!(!current(&item, &name));
         let mut titled = stored(&template(&name, &secret, None));
         assert!(current(&titled, &name));
-        titled["title"] = json!("aws/ci");
+        titled.title = "aws/ci".into();
         assert!(
             !current(&titled, &name),
             "an old title with the new section is rewritten"
         );
         let mut untitled = item.clone();
-        untitled["title"] = json!("aws");
+        untitled.title = "aws".into();
         assert!(read(&untitled).unwrap_err().fault.ends_with(
             "its section `optokens` has no `service` and `account`, and its title is not `<service>/<account>`"
         ));
     }
 
     #[test]
-    fn current_reads_the_name_only_from_the_section_named_optokens_by_its_label_or_id() {
+    fn current_reads_the_name_only_from_the_section_optokens() {
         let (name, secret) = secret();
-        let item = stored(&template(&name, &secret, None));
-        let with_sections = |section: Value, meta: &[&str]| {
-            let mut item = item.clone();
-            for f in item["fields"].as_array_mut().unwrap() {
-                if meta.contains(&f["label"].as_str().unwrap()) {
-                    f["section"] = section.clone();
-                }
+        let mut elsewhere = stored(&template(&name, &secret, None));
+        for f in &mut elsewhere.fields {
+            if [SERVICE, ACCOUNT].contains(&f.title.as_str()) {
+                f.section_id = Some(VALUES.into());
             }
-            item
-        };
-        let name_fields = [SERVICE, ACCOUNT];
+        }
         assert!(
-            current(
-                &with_sections(json!({ "id": "x7k2", "label": META }), &name_fields),
-                &name
-            ),
-            "a section `optokens` by its label, its id opaque, holds the name"
-        );
-        assert!(
-            current(&with_sections(json!({ "id": META }), &name_fields), &name),
-            "a section `optokens` by its id alone holds the name"
-        );
-        let elsewhere = json!({ "id": VALUES, "label": VALUES });
-        assert!(
-            !current(&with_sections(elsewhere, &name_fields), &name),
-            "Fields `service` and `account` among the values are no name, whatever else the section `optokens` holds"
+            !current(&elsewhere, &name),
+            "Fields `service` and `account` among the values are no name"
         );
     }
 
     #[test]
     fn candidates_are_the_tagged_items_of_either_title_and_a_stranger_is_refused() {
         let name = Name::new("aws", "ci").unwrap();
-        let item =
-            |id: &str, title: &str, tags: Value| json!({ "id": id, "title": title, "tags": tags });
-        let list = json!([
-            item("1", "aws.ci", json!(["optokens"])),
-            item("2", "gh", json!(["optokens"])),
-            item("3", "aws/ci", json!(["optokens", "x"])),
-            item("5", "aws", json!(["optokens"]))
-        ]);
-        assert_eq!(candidates(&list, &name).unwrap(), ["1", "3"]);
-        assert!(candidates(&json!([]), &name).unwrap().is_empty());
+        let item = |id: &str, title: &str| Item {
+            id: id.into(),
+            title: title.into(),
+            tags: vec![TAG.into()],
+            ..Default::default()
+        };
+        let items = [
+            item("1", "aws.ci"),
+            item("2", "gh"),
+            item("3", "aws/ci"),
+            item("5", "aws"),
+        ];
+        let ids = |found: Vec<&Item>| found.iter().map(|i| i.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(candidates(&items, &[], &name).unwrap()), ["1", "3"]);
+        assert!(candidates(&[], &[], &name).unwrap().is_empty());
         for title in ["aws.ci", "aws/ci"] {
-            let stranger = json!([item("3", title, Value::Null)]);
+            let stranger = Listed {
+                id: "9".into(),
+                title: title.into(),
+                tags: vec![],
+                updated_at: "t".into(),
+            };
             assert_eq!(
-                candidates(&stranger, &name).unwrap_err().kind,
-                Some("not_optokens")
+                candidates(&items, &[stranger], &name).unwrap_err().fault,
+                format!(
+                    "the vault's item `{title}` is not a Secret optokens wrote: it has no tag `optokens`"
+                )
             );
         }
         assert!(unique(&name, &["1"]).is_ok());
@@ -742,12 +742,6 @@ mod tests {
             refused.fault,
             "the vault has 2 items of the Secret `aws/ci` tagged `optokens`: 1, 4"
         );
-        let mixed = json!([
-            item("9", "z/default", json!(["optokens"])),
-            item("8", "other", json!([])),
-            item("7", "a/default", json!(["optokens"]))
-        ]);
-        assert_eq!(ours(&mixed), ["9", "7"]);
     }
 
     fn any_secret() -> impl Strategy<Value = (Name, Secret)> {
@@ -774,7 +768,7 @@ mod tests {
                 proptest::collection::btree_map(
                     label,
                     (".{0,12}", prop_oneof![Just(Plain), Just(Concealed)]),
-                    1..5
+                    1..14
                 )
                 .prop_map(|m| Values::Fields(
                     m.into_iter()

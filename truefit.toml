@@ -19,15 +19,41 @@ source = "docs/adr/0001-one-json-object-but-get-and-env.md:5"
 check = ["test"]
 
 [[promise]]
-name = "values-over-op-pipes"
-says = "A Secret's values go in and out only over `op`'s stdin and stdout (JSON item templates), and the service account's token goes only in the child's environment."
-source = "docs/adr/0002-reach-1password-through-op.md:5"
+name = "no-process-reaches-1password"
+says = "No `op`, and no child process reaches 1Password: `doctor` looks for no `op`, and neither the formula nor the Scoop manifest depends on one."
+source = "docs/adr/0015-reach-1password-through-opcore.md:9"
 check = ["test"]
 
 [[promise]]
 name = "no-value-in-argv-or-temp-file"
-says = "A secret value is never in any process's command line and never in a temporary file."
-source = "docs/adr/0002-reach-1password-through-op.md:5"
+says = "Decision record 2's invariant stands: a secret's value is never in any process's command line and never in a file in plaintext."
+source = "docs/adr/0015-reach-1password-through-opcore.md:13"
+check = ["test"]
+
+# The Copy (ADR 0015), kept by tests/secrets.rs and tests/init.rs on the stand-in Core.
+
+[[promise]]
+name = "copy-answers-within-its-life"
+says = "`list`, `get` and `env` answer from it, with no network within its Life; `--fresh` syncs first."
+source = "docs/adr/0015-reach-1password-through-opcore.md:10"
+check = ["test"]
+
+[[promise]]
+name = "a-write-syncs-first-and-reads-nothing-back"
+says = "`put` and `rm` sync, then write once: the Copy keeps what the write answered, with no read back."
+source = "docs/adr/0015-reach-1password-through-opcore.md:10"
+check = ["test"]
+
+[[promise]]
+name = "a-sync-gets-only-what-changed"
+says = "A Sync is one list and one batch get of the items that changed."
+source = "docs/adr/0015-reach-1password-through-opcore.md:11"
+check = ["test"]
+
+[[promise]]
+name = "untagged-title-refused"
+says = "Its list also names the untagged items, kept in memory only, so a title one of them holds is still refused (`not_optokens`)."
+source = "docs/adr/0015-reach-1password-through-opcore.md:11"
 check = ["test"]
 
 [[promise]]
@@ -63,7 +89,7 @@ check = ["test"]
 
 [[promise]]
 name = "no-value-in-argv-or-temp-file-invariant"
-says = "A secret's value is never in any process's argv and never written to a temporary file: it reaches `op` only on its stdin, and leaves it only on its stdout (`src/op.rs` builds every `op` command line)."
+says = "A secret's value is never in any process's argv and never written to a file in plaintext: optokens starts no process to reach 1Password (opcore runs its Core inside optokens, and `src/store.rs` is the one way to it), and the Copy, with its temporary file, is sealed."
 source = "CLAUDE.md:8"
 check = ["test"]
 

@@ -28,7 +28,7 @@ A Secret whose Fields are environment variables, labeled by their names, that `e
 _Avoid_: environment, env file, config set.
 
 **One-time link**:
-How optokens takes a value a person knows: a page served on the host's tailnet address only, behind a fresh token, good for one submission of one Secret within a few minutes. The value goes from the browser into `op`, never through the agent.
+How optokens takes a value a person knows: a page served on the host's tailnet address only, behind a fresh token, good for one submission of one Secret within a few minutes. The value goes from the browser into the Vault, never through the agent.
 _Avoid_: magic link, share link.
 
 ## Storage
@@ -37,5 +37,9 @@ _Avoid_: magic link, share link.
 The 1Password vault optokens keeps its Secrets in: the one the vault file names, else `optokens`.
 
 **Service account**:
-The 1Password service account optokens reaches the Vault as, through `op`. Its token is `OP_SERVICE_ACCOUNT_TOKEN`, else the token file, which only its owner may read.
+The 1Password service account optokens reaches the Vault as, through opcore. Its token is `OP_SERVICE_ACCOUNT_TOKEN`, else the token file, which only its owner may read.
 _Avoid_: API key, login.
+
+**Copy**:
+opcore's sealed copy of the Vault's items tagged `optokens`, the file `copy` beside the token file: `list`, `get` and `env` answer from it within its Life, 5 minutes after its last Sync, with no network. Derived from the Vault, never its truth.
+_Avoid_: cache.

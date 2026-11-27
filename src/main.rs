@@ -9,12 +9,13 @@ mod doctor;
 mod init;
 mod item;
 mod link;
-mod op;
 mod pipe;
 mod program;
 mod refusal;
 mod secret;
 mod serve;
+#[cfg(debug_assertions)]
+mod standin;
 mod store;
 mod tailscale;
 

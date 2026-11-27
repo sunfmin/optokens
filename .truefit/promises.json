@@ -16,6 +16,12 @@
     "sentence": "The link listens only on the tailnet address `tailscale ip` names that is on one of this host's interfaces; with no `tailscale` or no such address it stores nothing, and its refusal names what is missing.",
     "source": "docs/adr/0008-the-one-time-links-rules.md:21"
   },
+  "34f4221f8829": {
+    "mark": "not",
+    "sentence": "Undo: an `op`-backed Store behind the same interface; the module op.rs that built every `op` command line is in the history.",
+    "source": "docs/adr/0015-reach-1password-through-opcore.md:22",
+    "why": "ADR 0015's undo note, its test arrangement and its lead sentence (kept by no-process-reaches-1password), and ADR 0002's superseded promises (decision record 15 holds them now)"
+  },
   "4bb5ad4cd9a9": {
     "mark": "not",
     "sentence": "`optokens --help` is the manual and its only copy; keep it true whenever behaviour changes.",
@@ -25,6 +31,18 @@
     "mark": "not",
     "sentence": "Felix, 2026-11-26: 「Chose: B, because a value given on the command line is not secret by optokens' own rule, and hiding it only makes the vault harder to read.」 (B: a Field's type follows how its value came in: not secret → `STRING`, secret → `CONCEALED`.)",
     "source": "docs/adr/0011-a-fields-type-follows-how-its-value-came-in.md:3"
+  },
+  "56677bde418c": {
+    "mark": "not",
+    "sentence": "The tests run the real binary on a stand-in Core (`src/standin.rs`), built only without `--release` and used only when `OPTOKENS_STANDIN_STATE` names its state.",
+    "source": "docs/adr/0015-reach-1password-through-opcore.md:15",
+    "why": "ADR 0015's undo note, its test arrangement and its lead sentence (kept by no-process-reaches-1password), and ADR 0002's superseded promises (decision record 15 holds them now)"
+  },
+  "703ee8be453d": {
+    "mark": "not",
+    "sentence": "optokens reaches 1Password only through opcore, which runs 1Password's SDK Core inside optokens.",
+    "source": "docs/adr/0015-reach-1password-through-opcore.md:9",
+    "why": "ADR 0015's undo note, its test arrangement and its lead sentence (kept by no-process-reaches-1password), and ADR 0002's superseded promises (decision record 15 holds them now)"
   },
   "756bd25d8a81": {
     "mark": "promise",
@@ -47,9 +65,10 @@
     "source": "docs/adr/0008-the-one-time-links-rules.md:17"
   },
   "9aa804054b37": {
-    "mark": "promise",
+    "mark": "not",
     "sentence": "A Secret's values go in and out only over `op`'s stdin and stdout (JSON item templates), and the service account's token goes only in the child's environment.",
-    "source": "docs/adr/0002-reach-1password-through-op.md:5"
+    "source": "docs/adr/0002-reach-1password-through-op.md:7",
+    "why": "ADR 0015's undo note, its test arrangement and its lead sentence (kept by no-process-reaches-1password), and ADR 0002's superseded promises (decision record 15 holds them now)"
   },
   "9b46547fdf52": {
     "mark": "promise",
@@ -72,9 +91,10 @@
     "source": "docs/adr/0011-a-fields-type-follows-how-its-value-came-in.md:16"
   },
   "b26f6dba9782": {
-    "mark": "promise",
+    "mark": "not",
     "sentence": "A secret value is never in any process's command line and never in a temporary file.",
-    "source": "docs/adr/0002-reach-1password-through-op.md:5"
+    "source": "docs/adr/0002-reach-1password-through-op.md:7",
+    "why": "ADR 0015's undo note, its test arrangement and its lead sentence (kept by no-process-reaches-1password), and ADR 0002's superseded promises (decision record 15 holds them now)"
   },
   "c02625107ae2": {
     "mark": "not",

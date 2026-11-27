@@ -1,9 +1,11 @@
 #!/bin/sh
-# The end-to-end check against a real 1Password vault and the real `op`:
+# The end-to-end check against a real 1Password vault, optokens reaching it
+# through opcore and the script checking it through the real `op`:
 # put (a Meta among it) -> list -> get -> env -> put again (upsert) -> `op read op://` -> a put over the item retitled as
 # an earlier optokens titled it -> a put over the Description in the section, as before the notes -> a put of two pipes
 # -> a put over mytokens' tags and section -> put --description "" -> rm, each answer checked, the item and its field
-# types checked in the vault through `op item get`, and `ps` sampled during the put for the value. Outside the gate: it needs the network and a token.
+# types checked in the vault through `op item get`, `ps` sampled during the put for the value, and the config directory
+# (the sealed Copy) searched for it. Outside the gate: it needs the network and a token.
 #
 #   scripts/e2e.sh <mytokens-profile> [vault]
 #
@@ -25,8 +27,9 @@ check() { # <what> <jq filter that must be true> <json>
     printf 'ok: %s\n' "$1"
 }
 
-cargo build --quiet
-bin=$PWD/target/debug/optokens
+# Release: the 1Password Core runs in wasmi, minutes per sign-in in a debug build.
+cargo build --release --quiet
+bin=$PWD/target/release/optokens
 # What follows has the token: from here on nothing prints a value.
 eval "$(mytokens env "$profile")"
 [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || fail "Profile $profile has no OP_SERVICE_ACCOUNT_TOKEN"
@@ -38,7 +41,7 @@ printf '%s\n' "$vault" >"$XDG_CONFIG_HOME/optokens/vault"
 
 say optokens doctor
 doctor=$("$bin" doctor || true)
-printf '%s\n' "$doctor" | jq -c '.found | {op, token, vault}'
+printf '%s\n' "$doctor" | jq -c '.found | {token, vault}'
 resolved=$(printf '%s' "$doctor" | jq -r '.found.vault.name')
 [ "$resolved" = "$vault" ] || fail "optokens would use the vault '$resolved', not '$vault': refusing to write"
 op vault get "$vault" --format json | jq -e --arg v "$vault" '.name == $v' >/dev/null ||
@@ -76,14 +79,14 @@ types() { # <when>
 # ps sampled in a loop for as long as the put runs: the value must never show.
 # `case` is the shell's own, so the value is in no process's argv here either.
 argv_watch() {
-    samples=0 seen_op=0 hits=0
+    samples=0 seen_put=0 hits=0
     while [ ! -e "$XDG_CONFIG_HOME/put.done" ]; do
         args=$(ps -axo args)
         samples=$((samples + 1))
-        case $args in *"op item"*) seen_op=$((seen_op + 1)) ;; esac
+        case $args in *"$bin put"*) seen_put=$((seen_put + 1)) ;; esac
         case $args in *"$value"*) hits=$((hits + 1)) ;; esac
     done
-    printf '%s %s %s\n' "$samples" "$seen_op" "$hits"
+    printf '%s %s %s\n' "$samples" "$seen_put" "$hits"
 }
 rm -f "$XDG_CONFIG_HOME/put.done"
 argv_watch >"$XDG_CONFIG_HOME/argv" &
@@ -96,11 +99,13 @@ touch "$XDG_CONFIG_HOME/put.done"
 wait "$watcher"
 echo "$out"
 check "put created it" '.secret == "'"$name"'" and .changed and .kind == "static" and .fields == ["A","TOKEN"]' "$out"
-read -r samples seen_op hits <"$XDG_CONFIG_HOME/argv"
+read -r samples seen_put hits <"$XDG_CONFIG_HOME/argv"
 rm -f "$XDG_CONFIG_HOME/argv" "$XDG_CONFIG_HOME/put.done"
-printf 'argv check: %s ps samples during the put, %s with an `op item` process, %s with the value\n' "$samples" "$seen_op" "$hits"
-[ "$seen_op" -gt 0 ] || fail "argv check: no sample caught op running"
+printf 'argv check: %s ps samples during the put, %s with the put running, %s with the value\n' "$samples" "$seen_put" "$hits"
+[ "$seen_put" -gt 0 ] || fail "argv check: no sample caught the put running"
 [ "$hits" = 0 ] || fail "argv check: the value was in a command line"
+! grep -rqF -e "$value" -e "$OP_SERVICE_ACCOUNT_TOKEN" "$XDG_CONFIG_HOME/optokens" || fail "the value or the token is in the config directory in plaintext"
+echo "ok: the config directory holds neither the value nor the token in plaintext"
 
 say "op item get $title --vault $vault --format json  (values masked)"
 item=$(op item get "$title" --vault "$vault" --format json)

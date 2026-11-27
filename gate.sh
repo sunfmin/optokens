@@ -1,5 +1,5 @@
 #!/bin/sh
-# The fast gate (factorium.toml): fmt, clippy (native and for Windows), then slimfit runs the tests once and checks them against .slimfit/baseline.json, then docfit checks this repo's own documents, then the release script short of publishing, then the version a tagless clone stamps.
+# The fast gate (factorium.toml): fmt, clippy (native and for Windows), no crate that builds C, then slimfit runs the tests once and checks them against .slimfit/baseline.json, then docfit checks this repo's own documents, then the release script short of publishing, then the version a tagless clone stamps.
 set -eu
 cd "$(dirname "$0")"
 [ -d "$HOME/.cargo/bin" ] && PATH="$HOME/.cargo/bin:$PATH"
@@ -9,6 +9,14 @@ cargo clippy --all-targets --quiet -- -D warnings
 # The Windows build, checked (not linked or run: there is no Windows host), so a
 # Windows-only branch cannot rot. rust-toolchain.toml installs its target.
 cargo clippy --all-targets --target x86_64-pc-windows-msvc --quiet -- -D warnings
+# No C on any target (ADR 0010; opcore's decision record 1): `cargo tree -i`
+# prints nothing, or fails, for a crate that is not built.
+for c in cc cmake; do
+    if cargo tree --quiet -e build,normal --target all -i "$c" 2>/dev/null | grep -q .; then
+        echo "gate: $c, which builds C, is in the dependency tree: cargo tree --target all -i $c"
+        exit 1
+    fi
+done
 slimfit check
 docfit check
 # The release script, as far as it goes without publishing: all five platforms
