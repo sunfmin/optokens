@@ -187,14 +187,17 @@ fn put_secret(
     // An item an earlier optokens wrote is rewritten in this layout, in place.
     let stale = found.as_ref().is_some_and(|f| !f.current);
     let changed = existing != Some(&merged) || stale;
+    let mut pending = false;
     if changed {
-        store
+        pending = store
             .write(found.as_ref(), &name, &merged)
-            .map_err(|r| vec![r])?;
+            .map_err(|r| vec![r])?
+            .waits();
     }
     Ok(json!({
         "secret": name.to_string(),
         "changed": changed,
+        "pending": pending,
         "kind": merged.kind.name(),
         "fields": merged.labels(),
     }))
@@ -355,10 +358,10 @@ fn moved(env: &Env, from: (&str, &str), to: (&str, &str)) -> Result<Value, Vec<R
             "`optokens rm` it first, or `mv` onto another name",
         )]);
     }
-    store
+    let written = store
         .write(Some(&found), &new, &found.secret)
         .map_err(|r| vec![r])?;
-    Ok(json!({ "secret": new.to_string(), "from": old.to_string() }))
+    Ok(json!({ "secret": new.to_string(), "from": old.to_string(), "pending": written.waits() }))
 }
 
 /// Removes the Secret; nothing to remove is no fault.
@@ -368,15 +371,16 @@ pub fn rm(env: &Env, service: &str, account: &str) -> Answer {
         .and_then(|name| {
             let mut store = opened(env, true)?;
             let found = store.find(&name).map_err(|r| vec![r])?;
+            let mut pending = false;
             if let Some(found) = &found {
-                store.delete(&found.item.id).map_err(|r| vec![r])?;
+                pending = store.delete(&found.item.id).map_err(|r| vec![r])?.waits();
             }
-            Ok((name, found.is_some()))
+            Ok((name, found.is_some(), pending))
         });
     match removed {
-        Ok((name, changed)) => {
-            Answer::json(&json!({ "secret": name.to_string(), "changed": changed }))
-        }
+        Ok((name, changed, pending)) => Answer::json(
+            &json!({ "secret": name.to_string(), "changed": changed, "pending": pending }),
+        ),
         Err(faults) => Answer::refused(faults),
     }
 }

@@ -10,7 +10,7 @@ use crate::link::{self, Input};
 use crate::refusal::Refusal;
 use crate::secret::{DEFAULT_ACCOUNT, Kind, Name, Secret, Values};
 use crate::serve::Endpoint;
-use crate::store::Store;
+use crate::store::{Store, Written};
 use agent_help::Table;
 use serde_json::{Value, json};
 
@@ -132,6 +132,15 @@ fn checks(store: &mut Store) -> Result<(), Refusal> {
         )
     };
     let by = |check| move |refusal: Refusal| failed(check, &refusal.fault);
+    // A probe write that waits in the Copy's pending file reached nothing: the
+    // next check's Sync pushes it, and that check writes over it.
+    let waits = |check: Check, why: String| {
+        Refusal::of(
+            &check,
+            format!("check `{}`: {why}", check.entry().name),
+            "run `optokens init --check` again once 1Password can be reached",
+        )
+    };
     if let Err(e) = store.sync() {
         return Err(match e {
             opcore::Error::NoVault(_) => failed(
@@ -151,9 +160,12 @@ fn checks(store: &mut Store) -> Result<(), Refusal> {
         meta: None,
         values: Values::Single(link::random_hex(16)),
     };
-    store
+    let written = store
         .write(left.as_ref(), &probe, &secret)
         .map_err(by(Check::ProbeWritten))?;
+    if let Written::Waits(why) = written {
+        return Err(waits(Check::ProbeWritten, why));
+    }
     let back = store.find(&probe).map_err(by(Check::ProbeReadBack))?;
     let Some(back) = back.filter(|found| found.secret == secret) else {
         return Err(failed(
@@ -161,5 +173,11 @@ fn checks(store: &mut Store) -> Result<(), Refusal> {
             "the probe item 1Password answered is not what was written",
         ));
     };
-    store.delete(&back.item.id).map_err(by(Check::ProbeRemoved))
+    match store
+        .delete(&back.item.id)
+        .map_err(by(Check::ProbeRemoved))?
+    {
+        Written::Through => Ok(()),
+        Written::Waits(why) => Err(waits(Check::ProbeRemoved, why)),
+    }
 }

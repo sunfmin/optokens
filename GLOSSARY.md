@@ -43,3 +43,7 @@ _Avoid_: API key, login.
 **Copy**:
 opcore's sealed copy of the Vault's items tagged `optokens`, the file `copy` beside the token file: `list`, `get` and `env` answer from it within its Life, 5 minutes after its last Sync, with no network. Derived from the Vault, never its truth.
 _Avoid_: cache.
+
+**Pending write**:
+A `put`, `mv` or `rm` 1Password could not take after its Sync (no network, the rate limit, 1Password down): opcore keeps it sealed in `copy.pending` beside the Copy, reads show it, and the next Sync that reaches the Vault pushes it. The command answers `pending: true`. Unlike the Copy, never derived: the file is its only record until pushed.
+_Avoid_: queue, offline write.
