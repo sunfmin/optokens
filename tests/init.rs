@@ -340,9 +340,9 @@ fn a_probe_that_1password_answers_otherwise_is_refused() {
     );
 }
 
-/// A probe 1Password cannot take now waits in the Copy's pending file: that
-/// is no write through, so the check refuses at the probe; the next check
-/// pushes it and writes over it.
+/// A probe write or delete 1Password cannot take now waits in the Copy's
+/// pending file: that reached nothing, so the check refuses at it; the next
+/// check pushes it and writes over it.
 #[test]
 fn a_probe_that_waits_for_the_vault_is_refused() {
     let host = host(json!({ "fail": { "ItemsCreateAll": "error sending request" } }));
@@ -366,4 +366,19 @@ fn a_probe_that_waits_for_the_vault_is_refused() {
     );
     assert_eq!(check.code, 0, "{}", check.stdout);
     assert_eq!(host.items(), json!([]));
+
+    // Written, but its delete waits: refused at `probe_removed`.
+    state = host.state();
+    state["core"]["fail"] = json!({ "ItemsDeleteAll": "error sending request" });
+    host.set_state(&state);
+    let left = host.run(
+        &["init", "--check"],
+        &[("OP_SERVICE_ACCOUNT_TOKEN", TOKEN)],
+        None,
+    );
+    assert_eq!(kinds(&left.json()), ["probe_removed"], "{}", left.stdout);
+    assert_eq!(
+        left.json()["error"][0]["fix"],
+        "run `optokens init --check` again once 1Password can be reached"
+    );
 }
