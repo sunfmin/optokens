@@ -152,11 +152,17 @@ fn checks(store: &mut Store) -> Result<(), Refusal> {
         values: Values::Single(link::random_hex(16)),
     };
     // A write that waits on this host has not reached the vault: no check.
-    let waits = "1Password could not be reached now; the write waits on this host";
-    let pending = store.write(left.as_ref(), &probe, &secret);
-    if pending.map_err(by(Check::ProbeWritten))? {
-        return Err(failed(Check::ProbeWritten, waits));
-    }
+    let reached = |check, done: Result<bool, Refusal>| match done.map_err(by(check))? {
+        true => Err(failed(
+            check,
+            "1Password could not be reached; it waits on this host",
+        )),
+        false => Ok(()),
+    };
+    reached(
+        Check::ProbeWritten,
+        store.write(left.as_ref(), &probe, &secret),
+    )?;
     let back = store.find(&probe).map_err(by(Check::ProbeReadBack))?;
     let Some(back) = back.filter(|found| found.secret == secret) else {
         return Err(failed(
@@ -164,11 +170,5 @@ fn checks(store: &mut Store) -> Result<(), Refusal> {
             "the probe item 1Password answered is not what was written",
         ));
     };
-    match store
-        .delete(&back.item.id)
-        .map_err(by(Check::ProbeRemoved))?
-    {
-        true => Err(failed(Check::ProbeRemoved, waits)),
-        false => Ok(()),
-    }
+    reached(Check::ProbeRemoved, store.delete(&back.item.id))
 }

@@ -124,10 +124,10 @@ impl Store {
     /// that is not optokens' layout.
     pub fn all(&mut self) -> Result<Vec<(Name, Secret, bool)>, Vec<Refusal>> {
         let items = self.items().map_err(|r| vec![r])?;
-        let waiting = self.waiting().map_err(|r| vec![r])?;
+        let pending = self.copy.pending().map_err(|e| vec![self.refused(e)])?;
         let (found, faults): (Vec<_>, Vec<_>) = items
             .iter()
-            .map(|i| item::read(i).map(|(n, s)| (n, s, waiting.contains(&i.id))))
+            .map(|i| item::read(i).map(|(n, s)| (n, s, pending.iter().any(|p| p.id == i.id))))
             .partition(Result::is_ok);
         if !faults.is_empty() {
             return Err(faults.into_iter().filter_map(Result::err).collect());
@@ -165,16 +165,11 @@ impl Store {
         self.waits(id)
     }
 
-    /// The ids of the items with writes not in the vault yet.
-    fn waiting(&mut self) -> Result<Vec<String>, Refusal> {
-        let pending = self.copy.pending().map_err(|e| self.refused(e));
-        Ok(pending?.into_iter().map(|p| p.id).collect())
-    }
-
     /// Whether item `id` has a write waiting; if so, says on stderr why
     /// and when it reaches the vault.
     fn waits(&mut self, id: &str) -> Result<bool, Refusal> {
-        let waits = self.waiting()?.iter().any(|w| w == id);
+        let pending = self.copy.pending().map_err(|e| self.refused(e))?;
+        let waits = pending.iter().any(|p| p.id == id);
         if waits {
             let why = self.unreached.as_deref().unwrap_or("earlier writes wait");
             eprintln!("1Password could not be reached ({why}); {WAITS}");
