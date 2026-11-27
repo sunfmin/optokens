@@ -8,7 +8,7 @@
 mod common;
 
 use common::link::{DOMAIN, PEM, Waiting};
-use common::{Host, Ran, SYNC};
+use common::{FIRST_SYNC, Host, Ran};
 use serde_json::{Value, json};
 
 const TOKEN: (&str, &str) = ("OP_SERVICE_ACCOUNT_TOKEN", "ops_test_token");
@@ -83,7 +83,7 @@ fn fields_over_plain_http_store_once_and_a_second_post_is_gone() {
     assert_eq!(path.len(), 33, "{path}");
     assert_eq!(
         host.core_calls(),
-        SYNC,
+        FIRST_SYNC,
         "the vault is synced before the link"
     );
 
@@ -252,7 +252,7 @@ fn a_link_not_submitted_in_time_stores_nothing() {
         put.json()["error"][0]["fix"],
         "run the same `optokens put` again, and open its new link sooner"
     );
-    assert_eq!(host.core_calls(), SYNC);
+    assert_eq!(host.core_calls(), FIRST_SYNC);
 }
 
 #[test]
