@@ -9,8 +9,9 @@ regenerated = [".slimfit/baseline.json", ".docfit/baseline.json"]
 [cut]
 steps = ["packaging/release.sh cut $FACTORIUM_VERSION"]
 formula = "sunfmin/tap/optokens"
-# Five platforms built on this host, then published to the tap and the bucket.
-limit = 1800
+# Linux and Windows built here and published, the universal macOS build, then
+# the tap's run, which signs and notarizes it (release.sh waits at most 2400s).
+limit = 2700
 
 [idle]
 tasks = "slimfit --version && truefit --version && docfit --version && slimfit next --all --sample 5 && truefit next --all && docfit next --all"

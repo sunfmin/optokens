@@ -21,7 +21,8 @@ slimfit check
 truefit contract
 docfit check
 # The release script, as far as it goes without publishing: all five platforms
-# built, each binary's arch checked, the formula and the Scoop manifest written.
+# built (macOS as one universal binary), each binary's arch checked, the
+# formula and the Scoop manifest written.
 for s in packaging/release.sh packaging/push_file_test.sh; do sh -n "$s"; done
 packaging/push_file_test.sh
 for good in v0.1.0 v1.22.333; do packaging/release.sh check-tag "$good"; done
@@ -29,6 +30,12 @@ for bad in "" v1 v1.2 1.2.3 v1.2.3.4 v1..3 v1.2.x "v1.2.3;x"; do
     if packaging/release.sh check-tag "$bad" 2>/dev/null; then echo "gate: release.sh takes \"$bad\""; exit 1; fi
 done
 DIST=.slimfit/out/dist packaging/release.sh dry
+# A cut fails on a macOS binary not signed with Developer ID (ADR 0022): the
+# dry build's is signed ad hoc by the linker alone.
+if packaging/release.sh signed .slimfit/out/dist/macos/optokens 2>/dev/null; then
+    echo "gate: release.sh signed takes an ad hoc signature"
+    exit 1
+fi
 # Without tags (factorium's promotion clone), a build still stamps the
 # development form: Cargo.toml's version + the commit count + the hash.
 tagless=$PWD/.slimfit/out/tagless
