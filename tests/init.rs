@@ -269,11 +269,11 @@ fn nothing_is_written_before_a_submission_nor_when_init_is_refused() {
     assert_eq!(kinds(&ran.json()), ["link_expired"]);
     assert_eq!(
         ran.json()["error"][0]["fault"],
-        "no value was submitted on the one-time link for `optokens init` before it expired, so nothing was stored"
+        "no value was submitted on the one-time link for `optokens init` before it expired, so nothing was stored; no connection reached it"
     );
     assert_eq!(
         ran.json()["error"][0]["fix"],
-        "run the same `optokens init` again, and open its new link sooner"
+        "run `optokens doctor` (macOS's firewall), and see that the tailnet's ACL lets the device reach this host; then run the same `optokens init` again"
     );
     assert!(!host.config().exists());
     assert!(host.core_calls().is_empty());
