@@ -252,7 +252,9 @@ fn a_firewall_rule_blocking_the_binary_is_found_with_its_unblock_line() {
     );
     let fault = finding["fault"].as_str().unwrap();
     assert!(
-        fault.contains(&format!("a rule blocking incoming connections to `{b}`")),
+        fault.contains(&format!(
+            "blocks incoming connections to `{b}` (`socketfilterfw --listapps`)"
+        )),
         "{fault}"
     );
     assert!(
@@ -290,6 +292,10 @@ fn an_ad_hoc_binary_without_a_rule_is_found_while_only_signed_software_is_let_in
         calls,
         [
             (json!("socketfilterfw"), json!(["--getglobalstate"])),
+            (
+                json!("socketfilterfw"),
+                json!(["--getappblocked", binary()])
+            ),
             (json!("socketfilterfw"), json!(["--listapps"])),
             (json!("codesign"), json!(["-dv", binary()])),
             (json!("socketfilterfw"), json!(["--getallowsigned"])),
@@ -322,4 +328,56 @@ fn a_binary_the_firewall_lets_in_is_no_finding() {
     );
     let (_, answer) = strict.doctor(&[("OP_SERVICE_ACCOUNT_TOKEN", "x")]);
     assert_eq!(kinds(&answer), ["firewall_blocks"], "{answer}");
+}
+
+/// The firewall keeps one rule per code identity, listed at the
+/// first path it saw, so `--listapps` can miss this binary's path while
+/// `--getappblocked` says it is permitted; that answer decides.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_binary_the_firewall_says_is_permitted_is_no_finding_without_a_listed_rule() {
+    let host = firewalled(
+        json!({ "app_blocked": false, "apps": [{ "path": "/opt/homebrew/Cellar/optokens/0.1.6/bin/optokens" }], "allow_signed": false }),
+        json!({}),
+    );
+    let (_, answer) = host.doctor(&[("OP_SERVICE_ACCOUNT_TOKEN", "x")]);
+    assert_eq!(answer["findings"], json!([]), "{answer}");
+    assert_eq!(
+        answer["found"]["firewall"],
+        json!({ "enabled": true, "binary": binary(), "rule": "allow", "team": null })
+    );
+    let asked: Vec<_> = host
+        .calls()
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["program"] == "socketfilterfw")
+        .map(|c| c["args"][0].clone())
+        .collect();
+    assert_eq!(asked, [json!("--getglobalstate"), json!("--getappblocked")]);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_binary_the_firewall_says_is_blocked_is_found_with_its_unblock_line() {
+    let host = firewalled(json!({ "app_blocked": true, "apps": [] }), json!({}));
+    let (_, answer) = host.doctor(&[("OP_SERVICE_ACCOUNT_TOKEN", "x")]);
+    assert_eq!(kinds(&answer), ["firewall_blocks"], "{answer}");
+    let finding = &answer["findings"][0];
+    let fw = "/usr/libexec/ApplicationFirewall/socketfilterfw";
+    let b = binary();
+    assert_eq!(
+        finding["fix"],
+        format!(
+            "run `sudo {fw} --add {b} --unblockapp {b}`, or install a release signed with a Developer ID"
+        )
+    );
+    let fault = finding["fault"].as_str().unwrap();
+    assert!(
+        fault.starts_with(&format!(
+            "macOS's firewall blocks incoming connections to `{b}` (`socketfilterfw --getappblocked`)"
+        )),
+        "{fault}"
+    );
+    assert_eq!(answer["found"]["firewall"]["rule"], "block");
 }
