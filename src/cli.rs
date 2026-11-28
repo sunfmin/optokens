@@ -29,7 +29,7 @@ pub(crate) const EXIT_ERROR: i32 = 2;
 /// ## Rules to know first
 ///
 /// - A secret's value is never in any process's command line (`ps` does not show it) and never in a file in plaintext: optokens runs no program to reach 1Password (it runs 1Password's own SDK Core inside itself), and its Copy of the vault is sealed.
-/// - `get`, `env` and `list` answer from the Copy, the sealed copy of the vault's Secrets in the config directory, with no network within {const:LIFE_MINUTES} minutes of its last Sync. Past that, when the Sync fails (no network, 1Password down), they still answer from the Copy, with one line on stderr, `warning: 1Password could not be synced (<why>); answering from the local copy synced <age> ago`, and try no Sync again for {const:LIFE_MINUTES} minutes. Give `--fresh` right after a Secret was changed on another host. `--fresh` and `mv` always sync first, and fail when the Sync fails. `put` and `rm` sync first too; when that Sync cannot reach 1Password (no network, the rate limit, 1Password down), they go on from the Copy as held, their write waits as below, and stderr also says `1Password could not be reached (<why>); {const:WAITS}`; any other failed Sync refuses. After that Sync, a write 1Password cannot take now (no network, the rate limit, 1Password down) waits, sealed in `{const:PENDING_FILE}` beside the Copy: the command answers `"pending": true`, with one `warning:` line on stderr naming the write, why it waits and the file; every read shows it, and the next Sync that reaches 1Password (any command past the Copy's Life, or `--fresh`) pushes it, each change replayed on the item as it then is: a Field another host changed meanwhile is kept, and one both changed takes this host's value, named in a `warning:` line. Another host sees the write only after that push. Any other refusal of a write is its error, and nothing waits.
+/// - `get`, `env` and `list` answer from the Copy, the sealed copy of the vault's Secrets in the config directory, with no network however long ago it was synced. optokens reaches 1Password only with `--fresh`, at a write (`put`, `rm`, `mv`), at a `get` or `env` of a Secret the Copy lacks, or when there is no Copy yet. Give `--fresh` right after a Secret was changed on another host: until then a read answers as the Copy holds it. A `get` or `env` of a Secret the Copy lacks syncs once, then answers it or refuses `not_found`; when that Sync fails (no network, 1Password down), it answers from the Copy, with one line on stderr, `warning: 1Password could not be synced (<why>); answering from the local copy synced <age> ago`. With no Copy yet, a read whose Sync fails refuses (`vault_failed`). `--fresh` and `mv` always sync first, and fail when the Sync fails. `put` and `rm` sync first too; when that Sync cannot reach 1Password (no network, the rate limit, 1Password down), they go on from the Copy as held, their write waits as below, and stderr also says `1Password could not be reached (<why>); {const:WAITS}`; any other failed Sync refuses. After that Sync, a write 1Password cannot take now (no network, the rate limit, 1Password down) waits, sealed in `{const:PENDING_FILE}` beside the Copy: the command answers `"pending": true`, with one `warning:` line on stderr naming the write, why it waits and the file; every read warns of it with one `warning:` line on stderr naming how many wait, their file, and `{const:PUSH}`, which pushes them now; and the next Sync that reaches 1Password (`--fresh`, the next write, a Secret the Copy lacks) pushes it, each change replayed on the item as it then is: a Field another host changed meanwhile is kept, and one both changed takes this host's value, named in a `warning:` line. Another host sees the write only after that push. Any other refusal of a write is its error, and nothing waits.
 /// - A command that takes a value a person knows waits for it to be submitted on a one-time link, which it prints first: it does not answer until the person submits it, or the link expires. Every other command asks nothing.
 ///
 /// ## Output
@@ -213,7 +213,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads the Secret from the Copy, with no network within {const:LIFE_MINUTES} minutes of its last Sync, and writes nothing but the Copy. Past that, or with `--fresh`, it syncs first: give `--fresh` right after the Secret was changed on another host. Past that, a Sync that fails still answers from the Copy, with a `warning:` line on stderr; with `--fresh`, it fails (`vault_failed`).
+    /// It reads the Secret from the Copy, with no network however old the Copy is, and writes nothing but the Copy. With `--fresh` it syncs first: give `--fresh` right after the Secret was changed on another host; a Sync that fails then fails it (`vault_failed`). A Secret the Copy lacks syncs once, then is answered or refused `not_found`; that Sync failing answers from the Copy, with a `warning:` line on stderr.
     ///
     /// ## What it answers
     ///
@@ -261,7 +261,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads the Secret from the Copy, with no network within {const:LIFE_MINUTES} minutes of its last Sync, and writes nothing but the Copy. Past that, or with `--fresh`, it syncs first: give `--fresh` right after the Secret was changed on another host. Past that, a Sync that fails still answers from the Copy, with a `warning:` line on stderr; with `--fresh`, it fails (`vault_failed`).
+    /// It reads the Secret from the Copy, with no network however old the Copy is, and writes nothing but the Copy. With `--fresh` it syncs first: give `--fresh` right after the Secret was changed on another host; a Sync that fails then fails it (`vault_failed`). A Secret the Copy lacks syncs once, then is answered or refused `not_found`; that Sync failing answers from the Copy, with a `warning:` line on stderr.
     ///
     /// ## What it answers
     ///
@@ -295,7 +295,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads every item tagged `optokens` from the Copy, synced first only past its Life of {const:LIFE_MINUTES} minutes or with `--fresh`, and writes nothing but the Copy. Past its Life, a Sync that fails still answers from the Copy, with a `warning:` line on stderr; with `--fresh`, it fails (`vault_failed`). Items without the tag are not optokens' and not listed.
+    /// It reads every item tagged `optokens` from the Copy, with no network however old the Copy is, synced first only with `--fresh` or when there is no Copy yet, and writes nothing but the Copy. With `--fresh`, a Sync that fails fails it (`vault_failed`); `list --fresh` also pushes the writes that wait on this host. Items without the tag are not optokens' and not listed.
     ///
     /// ## What it answers
     ///
@@ -460,7 +460,7 @@ pub(crate) fn help() -> Help {
         .constant("STRING", item::STRING)
         .constant("CONCEALED", item::CONCEALED)
         .constant("LINK_MINUTES", crate::link::LIFETIME.as_secs() / 60)
-        .constant("LIFE_MINUTES", crate::store::LIFE.as_secs() / 60)
+        .constant("PUSH", crate::store::PUSH)
         .constant("COPY_FILE", crate::store::COPY_FILE)
         .constant("WAITS", crate::store::WAITS)
         .constant(

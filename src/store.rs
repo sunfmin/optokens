@@ -1,7 +1,9 @@
 //! The vault, through opcore (ADR 0015): finding, reading, writing and
 //! removing Secrets. It keeps opcore's sealed Copy of the items tagged
-//! `optokens` in the config directory, answers from it with no network
-//! within its [`LIFE`], and writes through the Copy's Client, which keeps
+//! `optokens` in the config directory, answers from it with no network on
+//! demand (ADR 0019): it reaches 1Password only at `--fresh`, a write, a
+//! Secret the Copy lacks, or with no Copy yet. It writes through the Copy's
+//! Client, which keeps
 //! what each write answered. No child process, no command line: a value
 //! leaves this process only inside the Core's encrypted requests.
 
@@ -10,12 +12,11 @@ use crate::item;
 use crate::refusal::Refusal;
 use crate::secret::{Fault, Name, Secret};
 use opcore::core::{Core, Failure, Wasm};
-use opcore::{Copy, Error, Item};
+use opcore::{Copy, Error, Item, Syncs};
 use std::path::Path;
-use std::time::Duration;
 
-/// How long the Copy answers with no Sync. `--fresh` syncs within it.
-pub const LIFE: Duration = Duration::from_secs(5 * 60);
+/// The command a read's warning names to push the writes that wait.
+pub const PUSH: &str = "optokens list --fresh";
 /// The Copy's file, in the config directory beside the token file.
 pub const COPY_FILE: &str = "copy";
 /// What stderr says of a write whose Sync could not reach 1Password, after
@@ -57,7 +58,7 @@ impl Store {
             token.value(),
             &vault,
             item::TAG,
-            life(),
+            Syncs::OnDemand { push: PUSH.into() },
         );
         Store {
             copy,
@@ -90,7 +91,7 @@ impl Store {
         }
     }
 
-    /// The Copy's items, synced first if past its Life.
+    /// The Copy's items, synced first only when there is no Copy yet.
     fn items(&mut self) -> Result<Vec<Item>, Refusal> {
         let items = self.copy.items().map(|i| i.into_iter().cloned().collect());
         items.map_err(|e| self.refused(e))
@@ -99,8 +100,23 @@ impl Store {
     /// `name`'s Secret, `None` when the vault has none: the one item of its
     /// title, or its earlier title, whose section names it. Refused when an
     /// item without the tag holds either title, as a Sync of this process
-    /// saw it (`put`, `mv` and `rm` sync first).
+    /// saw it (`put`, `mv` and `rm` sync first). A Secret the Copy lacks
+    /// syncs once a process (opcore's miss rule), then is looked for again;
+    /// that Sync failing answers from the Copy, with opcore's warning.
     pub fn find(&mut self, name: &Name) -> Result<Option<Found>, Refusal> {
+        match self.held(name)? {
+            None => {
+                // Only for its Sync: an error it meets, the Copy's read,
+                // the look again meets too, and refuses.
+                let _ = self.copy.find(&name.title());
+                self.held(name)
+            }
+            found => Ok(found),
+        }
+    }
+
+    /// `name`'s Secret as the Copy holds it, with no Sync but a first one.
+    fn held(&mut self, name: &Name) -> Result<Option<Found>, Refusal> {
         let items = self.items()?;
         let others = self.copy.others().unwrap_or_default();
         let mut found = Vec::new();
@@ -211,22 +227,8 @@ impl Written {
     }
 }
 
-/// The environment variable a test sets to shorten the Copy's Life, in
-/// milliseconds, in a build without `--release`; the manual does not list it.
-#[cfg(debug_assertions)]
-const TEST_LIFE: &str = "OPTOKENS_TEST_COPY_LIFE_MS";
-
-/// [`LIFE`], or a test's.
-fn life() -> Duration {
-    #[cfg(debug_assertions)]
-    if let Some(ms) = std::env::var(TEST_LIFE).ok().and_then(|ms| ms.parse().ok()) {
-        return Duration::from_millis(ms);
-    }
-    LIFE
-}
-
 /// The Core the Copy signs in on: 1Password's, made only when it first
-/// signs in (a Copy within its Life never does), or, in a build without
+/// signs in (a read the Copy answers never does), or, in a build without
 /// `--release` whose `OPTOKENS_STANDIN_STATE` is set, the tests' stand-in.
 pub enum Backend {
     Wasm(Option<Box<Wasm>>),

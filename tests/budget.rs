@@ -8,13 +8,13 @@
 
 mod common;
 
-use common::Host;
+use common::{Host, meta, stored, value};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 const TOKEN: (&str, &str) = ("OP_SERVICE_ACCOUNT_TOKEN", "ops_test_token");
-/// A Copy past its Life at once.
-const STALE: (&str, &str) = ("OPTOKENS_TEST_COPY_LIFE_MS", "0");
+/// A year, in seconds: how old an old Copy is made.
+const YEAR: u64 = 365 * 86400;
 const FILE: &str = "docs/budget.md";
 
 /// Reads, writes and account requests.
@@ -115,19 +115,21 @@ struct Row {
     spent: Budget,
 }
 
-/// A scenario: what the row says, the arguments, whether the Copy is past
-/// its Life, the Core calls it makes, and what they spend.
+/// A scenario: what the row says, the arguments, whether the Copy is made a
+/// year old first, the Core calls it makes, and what they spend.
 type Step<'a> = (&'a str, &'a str, bool, &'a str, Budget);
 
 /// Runs each step on `host`, asserting it exits 0 with its calls and
 /// Budget, and answers its rows.
 fn steps(costs: &Costs, host: &Host, steps: &[Step]) -> Vec<Row> {
     let mut rows = Vec::new();
-    for &(command, args, stale, calls, budget) in steps {
+    for &(command, args, old, calls, budget) in steps {
+        if old {
+            host.age_copy(YEAR);
+        }
         host.forget_calls();
-        let env = [TOKEN, STALE];
         let args: Vec<&str> = args.split_whitespace().collect();
-        let ran = host.run(&args, &env[..1 + stale as usize], None);
+        let ran = host.run(&args, &[TOKEN], None);
         assert_eq!(ran.code, 0, "{command}: {} {}", ran.stdout, ran.stderr);
         let row = Row {
             command: command.into(),
@@ -194,31 +196,39 @@ fn rows() -> Vec<Row> {
             ),
         ],
     );
-    for (stale, when, calls, budget) in [
-        (false, "within the Copy's Life", "", [0, 0, 0]),
-        (
-            true,
-            "past the Copy's Life, nothing changed",
-            SYNC,
-            [1, 0, 1],
-        ),
+    for (name, args) in [
+        ("list", "list"),
+        ("get", "get db --field A"),
+        ("env", "env db"),
     ] {
-        for (name, args) in [
-            ("list", "list"),
-            ("get", "get db --field A"),
-            ("env", "env db"),
-        ] {
-            let command = format!("`{name}` {when}");
-            rows.extend(steps(
-                &costs,
-                &host,
-                &[(&command, args, stale, calls, budget)],
-            ));
-        }
+        let command = format!("`{name}` from an old Copy");
+        rows.extend(steps(
+            &costs,
+            &host,
+            &[(&command, args, true, "", [0, 0, 0])],
+        ));
     }
+    host.add(stored(
+        "api1",
+        "api",
+        json!(["optokens"]),
+        json!([
+            value(0, "K", "1"),
+            meta("service", "api"),
+            meta("account", "default"),
+            meta("kind", "static"),
+            meta("shape", "fields")
+        ]),
+    ));
+    let lacks = "`get` of a Secret the Copy lacks, made on another host";
+    let got = "init_client ItemsList ItemsGetAll";
+    rows.extend(steps(
+        &costs,
+        &host,
+        &[(lacks, "get api --field K", true, got, [1, 0, 1])],
+    ));
     host.change("db", "A", "3");
     let changed = "`get --fresh`, the Secret changed on another host";
-    let got = "init_client ItemsList ItemsGetAll";
     rows.extend(steps(
         &costs,
         &host,

@@ -41,7 +41,7 @@ The 1Password service account optokens reaches the Vault as, through opcore. Its
 _Avoid_: API key, login.
 
 **Copy**:
-opcore's sealed copy of the Vault's items tagged `optokens`, the file `copy` beside the token file: `list`, `get` and `env` answer from it within its Life, 5 minutes after its last Sync, with no network. Derived from the Vault, never its truth.
+opcore's sealed copy of the Vault's items tagged `optokens`, the file `copy` beside the token file: `list`, `get` and `env` answer from it with no network however old it is; it syncs only at `--fresh`, a write, a Secret it lacks, or when there is none yet (decision record 19). Derived from the Vault, never its truth.
 _Avoid_: cache.
 
 **Pending write**:
