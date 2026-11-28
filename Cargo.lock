@@ -406,7 +406,7 @@ dependencies = [
 [[package]]
 name = "factum"
 version = "0.1.0"
-source = "git+https://github.com/sunfmin/factum?rev=bb0ca09cb2cd8f96d38bfa0cc5946821db41503a#bb0ca09cb2cd8f96d38bfa0cc5946821db41503a"
+source = "git+https://github.com/sunfmin/factum?rev=57db9ec6ca676e9df2bea525c272153e7ffd9c09#57db9ec6ca676e9df2bea525c272153e7ffd9c09"
 dependencies = [
  "factum-core",
  "factum-store",
@@ -418,7 +418,7 @@ dependencies = [
 [[package]]
 name = "factum-core"
 version = "0.1.0"
-source = "git+https://github.com/sunfmin/factum?rev=bb0ca09cb2cd8f96d38bfa0cc5946821db41503a#bb0ca09cb2cd8f96d38bfa0cc5946821db41503a"
+source = "git+https://github.com/sunfmin/factum?rev=57db9ec6ca676e9df2bea525c272153e7ffd9c09#57db9ec6ca676e9df2bea525c272153e7ffd9c09"
 dependencies = [
  "serde",
  "serde_json",
@@ -428,7 +428,7 @@ dependencies = [
 [[package]]
 name = "factum-sealed"
 version = "0.1.0"
-source = "git+https://github.com/sunfmin/factum?rev=bb0ca09cb2cd8f96d38bfa0cc5946821db41503a#bb0ca09cb2cd8f96d38bfa0cc5946821db41503a"
+source = "git+https://github.com/sunfmin/factum?rev=57db9ec6ca676e9df2bea525c272153e7ffd9c09#57db9ec6ca676e9df2bea525c272153e7ffd9c09"
 dependencies = [
  "chacha20poly1305 0.10.1",
  "factum-core",
@@ -441,7 +441,7 @@ dependencies = [
 [[package]]
 name = "factum-store"
 version = "0.1.0"
-source = "git+https://github.com/sunfmin/factum?rev=bb0ca09cb2cd8f96d38bfa0cc5946821db41503a#bb0ca09cb2cd8f96d38bfa0cc5946821db41503a"
+source = "git+https://github.com/sunfmin/factum?rev=57db9ec6ca676e9df2bea525c272153e7ffd9c09#57db9ec6ca676e9df2bea525c272153e7ffd9c09"
 dependencies = [
  "factum-core",
  "serde",
@@ -743,7 +743,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 [[package]]
 name = "opcore"
 version = "0.1.0"
-source = "git+https://github.com/sunfmin/opcore?rev=3b582b2db7567c9e18c4299f10081c8cf1180f46#3b582b2db7567c9e18c4299f10081c8cf1180f46"
+source = "git+https://github.com/sunfmin/opcore?rev=a7045abe127202955a14d26b83641c9c66a8422e#a7045abe127202955a14d26b83641c9c66a8422e"
 dependencies = [
  "chacha20poly1305 0.11.0",
  "factum",
