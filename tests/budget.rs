@@ -1,9 +1,11 @@
 //! What each command spends of the service account's Budget, on the
 //! stand-in Core: each scenario asserts its Core calls and its reads,
-//! writes and account requests, and `docs/budget.md` is the table of them
-//! all, which this test fails on when it is stale. Each method's cost is
-//! read from opcore's decision record 1, the one home of the numbers, in
-//! the opcore source this build compiles (found by `cargo metadata`).
+//! writes, and `docs/budget.md` is the table of them all, with the
+//! account's requests they spend (one per read and per write, opcore's
+//! decision record 7), which this test fails on when it is stale. Each
+//! method's cost is read from opcore's decision record 1, the one home of
+//! the numbers, in the opcore source this build compiles (found by `cargo
+//! metadata`).
 #![cfg(unix)]
 
 mod common;
@@ -17,8 +19,14 @@ const TOKEN: (&str, &str) = ("OP_SERVICE_ACCOUNT_TOKEN", "ops_test_token");
 const YEAR: u64 = 365 * 86400;
 const FILE: &str = "docs/budget.md";
 
-/// Reads, writes and account requests.
-type Budget = [u32; 3];
+/// Reads and writes. The account's daily requests count each of both
+/// (opcore's decision record 7): `account`.
+type Budget = [u32; 2];
+
+/// The account's daily requests `b` spends: one per read and per write.
+fn account(b: Budget) -> u32 {
+    b[0] + b[1]
+}
 
 /// opcore's decision record 1: each method's cost, and what a sign-in's
 /// first vault call spends besides it.
@@ -61,28 +69,27 @@ fn adr() -> PathBuf {
 }
 
 /// The record's table (`| `Method` … | reads | writes | … |`, a parenthesis
-/// saying how a row was measured) and its line `Each sign-in's first vault
-/// call: N read, M of the account's …`.
+/// saying how a row was measured) and its line `A sign-in's first vault
+/// call: N read; …`.
 fn costs() -> Costs {
     let adr = std::fs::read_to_string(adr()).unwrap();
     let mut each = Vec::new();
     for line in adr.lines().filter(|l| l.starts_with("| `")) {
         let cells: Vec<&str> = line.split('|').map(str::trim).collect();
-        let cost = [cells[2].parse().unwrap(), cells[3].parse().unwrap(), 0];
+        let cost = [cells[2].parse().unwrap(), cells[3].parse().unwrap()];
         let methods = cells[1].split('(').next().unwrap().split('`');
         for m in methods.skip(1).step_by(2) {
             each.push((m.to_string(), cost));
         }
     }
-    let lead = "Each sign-in's first vault call:";
-    let line = adr.lines().find_map(|l| l.strip_prefix(lead)).unwrap();
-    let n: Vec<u32> = (line.split(',').take(2))
-        .map(|part| part.split_whitespace().next().unwrap().parse().unwrap())
-        .collect();
+    let lead = "A sign-in's first vault call:";
+    let line = adr.lines().find_map(|l| l.strip_prefix(lead));
+    let line = line.unwrap_or_else(|| panic!("opcore's decision record 1 lacks `{lead}`"));
+    let reads = line.split_whitespace().next().unwrap().parse().unwrap();
     assert!(!each.is_empty(), "opcore's decision record 1 has no table");
     Costs {
         each,
-        first_call: [n[0], 0, n[1]],
+        first_call: [reads, 0],
     }
 }
 
@@ -90,8 +97,8 @@ fn costs() -> Costs {
 /// not refuse, its method's cost, and each sign-in's first vault call
 /// `first_call` more, as opcore's stand-in counts.
 fn spent(costs: &Costs, calls: &Value) -> Budget {
-    let mut spent = [0; 3];
-    let mut add = |b: Budget| (0..3).for_each(|i| spent[i] += b[i]);
+    let mut spent = [0; 2];
+    let mut add = |b: Budget| (0..2).for_each(|i| spent[i] += b[i]);
     let mut first = false;
     for call in calls.as_array().into_iter().flatten() {
         let method = call["method"].as_str().unwrap();
@@ -172,28 +179,28 @@ fn rows() -> Vec<Row> {
                 "list",
                 false,
                 first_list,
-                [2, 0, 1],
+                [1, 0],
             ),
             (
                 "`put --now` of a new Secret",
                 "put db --set A=1 --now",
                 false,
                 create,
-                [2, 1, 1],
+                [2, 1],
             ),
             (
                 "`put --now` of what the Secret holds",
                 "put db --set A=1 --now",
                 false,
                 SYNC,
-                [1, 0, 1],
+                [1, 0],
             ),
             (
                 "`put --now` of a changed Field",
                 "put db --set A=2 --now",
                 false,
                 EDIT,
-                [3, 1, 1],
+                [3, 1],
             ),
         ],
     );
@@ -203,11 +210,7 @@ fn rows() -> Vec<Row> {
         ("env", "env db"),
     ] {
         let command = format!("`{name}` from an old Copy");
-        rows.extend(steps(
-            &costs,
-            &host,
-            &[(&command, args, true, "", [0, 0, 0])],
-        ));
+        rows.extend(steps(&costs, &host, &[(&command, args, true, "", [0, 0])]));
     }
     host.add(stored(
         "api1",
@@ -226,7 +229,7 @@ fn rows() -> Vec<Row> {
     rows.extend(steps(
         &costs,
         &host,
-        &[(lacks, "get api --field K", true, got, [1, 0, 1])],
+        &[(lacks, "get api --field K", true, got, [1, 0])],
     ));
     host.change("db", "A", "3");
     let changed = "`get --fresh`, the Secret changed on another host";
@@ -234,8 +237,8 @@ fn rows() -> Vec<Row> {
         &costs,
         &host,
         &[
-            (changed, "get db --field A --fresh", false, got, [1, 0, 1]),
-            ("`mv --now`", "mv db web --now", false, EDIT, [3, 1, 1]),
+            (changed, "get db --field A --fresh", false, got, [1, 0]),
+            ("`mv --now`", "mv db web --now", false, EDIT, [3, 1]),
         ],
     ));
     let limited = json!({ "name": "RateLimitExceeded", "message": "rate limit exceeded" });
@@ -244,7 +247,7 @@ fn rows() -> Vec<Row> {
     rows.extend(steps(
         &costs,
         &host,
-        &[(waits, "put web --set A=4 --now", false, EDIT, [1, 0, 1])],
+        &[(waits, "put web --set A=4 --now", false, EDIT, [1, 0])],
     ));
     fail(&host, Value::Null);
     let push = "`list --fresh` that pushes that staged write";
@@ -253,9 +256,9 @@ fn rows() -> Vec<Row> {
         &costs,
         &host,
         &[
-            (push, "list --fresh", false, EDIT, [3, 1, 1]),
-            ("`rm --now`", "rm web --now", false, delete, [2, 1, 1]),
-            ("`doctor`", "doctor", false, "", [0, 0, 0]),
+            (push, "list --fresh", false, EDIT, [3, 1]),
+            ("`rm --now`", "rm web --now", false, delete, [2, 1]),
+            ("`doctor`", "doctor", false, "", [0, 0]),
         ],
     ));
     rows.extend(staged(&costs, &host));
@@ -265,7 +268,7 @@ fn rows() -> Vec<Row> {
     rows.extend(steps(
         &costs,
         &new,
-        &[(first, "put db --set A=1 --now", false, first_put, [3, 1, 1])],
+        &[(first, "put db --set A=1 --now", false, first_put, [2, 1])],
     ));
     rows
 }
@@ -304,7 +307,7 @@ fn staged(costs: &Costs, host: &Host) -> Vec<Row> {
             "push",
             false,
             "init_client ItemsList ItemsGetAll ItemsCreateAll ItemsPut ItemsDeleteAll",
-            [5, 3, 1],
+            [5, 3],
         )],
     ));
     rows
@@ -332,13 +335,15 @@ fn table(rows: &[Row]) -> String {
          `UPDATE_BUDGET=1 cargo test --test budget` rewrites it. Each method's cost \
          is opcore's decision record 1, in the opcore source `Cargo.lock` pins. \
          Each command is a new process: its first vault \
-         call after signing in spends one read and one of the account's daily \
-         requests more. A call 1Password refuses spends nothing.\n\n\
+         call after signing in spends one read more. The account's daily \
+         requests count each read and each write (opcore's decision record 7). \
+         A call 1Password refuses spends nothing.\n\n\
          | Command | Core calls | Reads | Writes | Account requests |\n\
          |---|---|---|---|---|\n",
     );
     for r in rows {
-        let [reads, writes, account] = r.spent;
+        let [reads, writes] = r.spent;
+        let account = account(r.spent);
         let calls = calls(&r.calls);
         t.push_str(&format!(
             "| {} | {calls} | {reads} | {writes} | {account} |\n",
