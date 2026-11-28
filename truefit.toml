@@ -52,7 +52,7 @@ check = ["test"]
 
 [[promise]]
 name = "a-sync-gets-only-what-changed"
-says = "A Sync is one list and one batch get of the items that changed."
+says = "A Sync is one list and one batch get of the items that changed, signed in to the vault id the Copy keeps: only its first Sync, or one whose kept id no longer names the vault, lists the vaults."
 source = "docs/adr/0015-reach-1password-through-opcore.md:11"
 check = ["test"]
 
@@ -117,6 +117,34 @@ says = "Metadata in a section of its own: chosen, because a user's Field may be 
 source = "docs/adr/0009-one-item-per-secret-metadata-in-its-own-section.md:13"
 check = ["test"]
 
+[[promise]]
+name = "write-keeps-what-optokens-does-not-own"
+says = "it carries what optokens does not own: every other tag, section and field (mytokens' tags and sections; the notes until decision record 14), read past and never refused"
+source = "docs/adr/0009-one-item-per-secret-metadata-in-its-own-section.md:9"
+check = ["test"]
+
+# A vault item's title and name (ADR 0013), kept by src/item.rs, src/secret.rs and tests/secrets.rs.
+
+[[promise]]
+name = "item-title-holds-no-slash"
+says = "A Secret's item is titled `<service>`, or `<service>.<account>` when the account is not `default`: never a `/`"
+source = "docs/adr/0013-a-vault-items-title-holds-no-slash.md:5"
+check = ["test"]
+
+[[promise]]
+name = "name-read-from-the-section-never-the-title"
+says = "the section `optokens` holds it, in the fields `service` and `account`, and reading takes the name from them, never by splitting the title."
+source = "docs/adr/0013-a-vault-items-title-holds-no-slash.md:7"
+check = ["test"]
+
+# Generated secrets on pipes (ADR 0012), kept by src/secret.rs and tests/secrets.rs.
+
+[[promise]]
+name = "field-from-pipe-takes-only-a-pipe"
+says = "`put` opens the path and refuses it, before reading anything, unless it is a pipe once links are followed (`/dev/fd/N`, on Linux `/proc/self/fd/N`). A file, a terminal or a missing path is `not_a_pipe`, a refusal that names the Label and never the path: after a mistaken `Label=$(command)` the path is the value."
+source = "docs/adr/0012-several-generated-secrets-each-on-a-pipe-of-its-own.md:7"
+check = ["test"]
+
 # A Field's type in the vault (ADR 0011), kept by the tests of src/item.rs,
 # src/secret.rs and tests/secrets.rs, tests/link.rs.
 
@@ -128,13 +156,25 @@ check = ["test"]
 
 [[promise]]
 name = "field-type-read-and-merged"
-says = "`read` takes each Field's type from its field, refusing any type but `STRING` and `CONCEALED`; `put` gives a Field it sets the type of the way it came in and keeps an unnamed Field's type, and writes nothing when neither value nor type changes."
+says = "`put` merges: a Field it sets takes the type of the way it came in, so `--set` over a concealed Field makes it `STRING` and `--field-from-stdin` over a plain one makes it `CONCEALED`; a Field it does not name keeps its type."
+source = "docs/adr/0011-a-fields-type-follows-how-its-value-came-in.md:14"
+check = ["test"]
+
+[[promise]]
+name = "put-changing-neither-value-nor-type-writes-nothing"
+says = "A type is a change only for a Field this `put` sets, so a `put` that changes neither value nor type writes nothing."
 source = "docs/adr/0011-a-fields-type-follows-how-its-value-came-in.md:14"
 check = ["test"]
 
 [[promise]]
 name = "field-type-changes-nothing-given-out"
-says = "The type changes only how 1Password shows a field: `get`, `env` and `list` give out the same as before. Items written when every value was `CONCEALED` read back as they are; nothing migrates them."
+says = "The type changes only how 1Password shows a field: `get`, `env` and `list` give out the same as before."
+source = "docs/adr/0011-a-fields-type-follows-how-its-value-came-in.md:16"
+check = ["test"]
+
+[[promise]]
+name = "concealed-items-read-as-they-are"
+says = "Items written when every value was `CONCEALED` read back as they are; nothing migrates them."
 source = "docs/adr/0011-a-fields-type-follows-how-its-value-came-in.md:16"
 check = ["test"]
 
@@ -187,6 +227,71 @@ name = "link-https-or-http-with-why"
 says = "With a certificate from `tailscale cert` the link is HTTPS; when `tailscale cert` fails it is plain HTTP on the tailnet, and the reason printed with it gives the error and the fix: an admin runs `sudo tailscale set --operator=<user>`, and HTTPS Certificates are on for the tailnet."
 source = "docs/adr/0008-the-one-time-links-rules.md:23"
 check = ["test"]
+
+[[promise]]
+name = "cert-and-key-on-stdout-never-a-file"
+says = "The certificate and key come from `tailscale cert --cert-file - --key-file -`, on its stdout, never through a file."
+source = "docs/adr/0010-tls-through-rustls-and-graviola.md:5"
+check = ["test"]
+
+# Writes that wait and writes that are staged (ADRs 0016, 0017, 0021), kept by tests/secrets.rs and tests/init.rs on the stand-in Core.
+
+[[promise]]
+name = "a-write-that-waits-answers-pending"
+says = "After that Sync, a write opcore answers as waiting (the rate limit, the network, 1Password down) is no failure: it waits sealed in `copy.pending`, opcore's warning goes to stderr, and the answer carries `\"pending\": true` (`false` for every write that went through, or no write)."
+source = "docs/adr/0016-a-write-1password-cannot-take-waits.md:8"
+check = ["test"]
+
+[[promise]]
+name = "init-probe-that-waits-refused"
+says = "`init --check`'s probe that waits is refused at its check (`probe_written`, `probe_removed`): a write that reached only the local file proves no grant."
+source = "docs/adr/0016-a-write-1password-cannot-take-waits.md:9"
+check = ["test"]
+
+[[promise]]
+name = "pending-sealed-under-the-token"
+says = "`copy.pending` is sealed under the token as the Copy is, so decision record 2's invariant stands"
+source = "docs/adr/0016-a-write-1password-cannot-take-waits.md:10"
+check = ["test"]
+
+[[promise]]
+name = "list-marks-pending"
+says = "`list` marks a Secret whose write waits `\"pending\": true`."
+source = "docs/adr/0017-a-write-whose-sync-cannot-reach-1password-waits-too.md:20"
+check = ["test"]
+
+[[promise]]
+name = "never-synced-copy-takes-no-write"
+says = "A Copy that never synced cannot take a write: it fails, as it cannot tell a new name from one another host made."
+source = "docs/adr/0017-a-write-whose-sync-cannot-reach-1password-waits-too.md:22"
+check = ["test"]
+
+[[promise]]
+name = "push-sends-every-staged-change-in-one-request"
+says = "`optokens push` sends every staged change in one process, one of the account's requests: each Secret's changes folded into one write (opcore's push), each made on the item as 1Password holds it then, then the pull of a Sync."
+source = "docs/adr/0021-writes-are-staged-and-pushed-in-one-batch.md:12"
+check = ["test"]
+
+[[promise]]
+name = "now-writes-through"
+says = "`--now` on `put`, `mv` and `rm` syncs first and writes through, as decision record 20 has every write do: for a change another host needs right away."
+source = "docs/adr/0021-writes-are-staged-and-pushed-in-one-batch.md:13"
+check = ["test"]
+
+[[promise]]
+name = "staged-changes-reach-1password-only-at-a-push"
+says = "Changes reach 1Password and other hosts only at a push."
+source = "docs/adr/0021-writes-are-staged-and-pushed-in-one-batch.md:15"
+check = ["test"]
+
+# The release (ADR 0022).
+
+[[promise]]
+name = "only-the-taps-workflow-signs"
+says = "Invariant: **the Developer ID identity and the notary key live only in sunfmin/homebrew-tap, and only its `release` workflow signs.**"
+source = "docs/adr/0022-macos-is-signed-and-notarized-by-the-taps-workflow.md:11"
+kept = "where the signing identity lives is how the repos are set up, in another repo's secrets no check here can read; the cut's `release.sh signed` refuses a binary that is not Developer ID signed, and the gate shows it refusing the dry build's ad hoc one"
+kept_forever = true
 
 # Kept by tests/budget.rs, which asserts each command's calls and Budget and fails when docs/budget.md is stale.
 [[promise]]

@@ -302,7 +302,7 @@ fn the_copy_answers_however_old_and_a_sync_gets_only_what_changed() {
 /// call and no warning; a Secret it lacks tries one Sync, which fails, and
 /// is refused `not_found` after one warning naming why and how old the Copy
 /// is; `--fresh` and `mv` fail. A Copy that never synced has nothing to
-/// answer.
+/// answer, and takes no write.
 #[test]
 fn a_miss_whose_sync_fails_answers_from_the_copy_with_a_warning() {
     let host = host();
@@ -364,6 +364,21 @@ fn a_miss_whose_sync_fails_answers_from_the_copy_with_a_warning() {
     let never = run(&cold, &["get", "db"]);
     assert_eq!((never.code, never.stdout.as_str()), (2, ""));
     assert_eq!(kinds(&never.error()), ["vault_failed"]);
+    // A Copy that never synced cannot take a write, staged or `--now`: it
+    // cannot tell a new name from one another host made (decision record 17).
+    for write in [
+        &["put", "db", "--set", "A=1"][..],
+        &["put", "--now", "db", "--set", "A=1"],
+    ] {
+        let refused = run(&cold, write);
+        assert_eq!(
+            refused.code, 2,
+            "{write:?}: {}{}",
+            refused.stdout, refused.stderr
+        );
+        assert_eq!(kinds(&refused.json()), ["vault_failed"], "{write:?}");
+        assert!(!cold.config().join("copy.pending").exists(), "{write:?}");
+    }
 }
 
 /// The Copy keeps its vault's id; when that id no longer names the vault,
