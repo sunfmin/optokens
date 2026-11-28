@@ -1,9 +1,14 @@
-//! A stand-in for `tailscale`, the one CLI optokens runs, for its tests:
-//! linked under its name into a directory placed first on `PATH`. Its state
+//! A stand-in for `tailscale`, the one CLI optokens runs to serve a link, and
+//! for `socketfilterfw` and `codesign`, which doctor asks about macOS's
+//! firewall, for its tests: linked under its name into a directory placed
+//! first on `PATH`. Its state
 //! is one JSON file, named by `OPTOKENS_STANDIN_STATE`, which the stand-in
 //! Core (`src/standin.rs`) shares: what it answers, the faults to inject, and
 //! every call it got, with whether the token was in its environment.
 
+#[allow(dead_code)]
+#[path = "../src/firewall.rs"]
+mod firewall;
 #[allow(dead_code)]
 #[path = "../src/tailscale.rs"]
 mod tailscale;
@@ -74,6 +79,69 @@ fn main() {
         (tailscale::PROGRAM, w) if w == tailscale::STATUS => {
             json!({ "BackendState": "Running", tailscale::CERT_DOMAINS: me["cert_domains"] })
                 .to_string()
+        }
+        // `socketfilterfw`: `state` (default 1), `allow_signed` (default
+        // true), and `apps`, each `{ "path", "block" }`, as macOS 26 prints
+        // them; `app_blocked` (true or false) answers `--getappblocked` as
+        // macOS 27 does, and without it that is refused as unknown.
+        (_, w) if program == "socketfilterfw" && w == firewall::GLOBAL_STATE => {
+            let state = me["state"].as_u64().unwrap_or(1);
+            let word = if state == 0 { "disabled" } else { "enabled" };
+            format!("Firewall is {word}. (State = {state})")
+        }
+        (_, w) if program == "socketfilterfw" && w == firewall::ALLOW_SIGNED => {
+            let word = if me["allow_signed"].as_bool().unwrap_or(true) {
+                "ENABLED"
+            } else {
+                "DISABLED"
+            };
+            format!(
+                "Automatically allow built-in signed software ENABLED.\nAutomatically allow downloaded signed software {word}."
+            )
+        }
+        (_, [flag, path])
+            if program == "socketfilterfw"
+                && *flag == firewall::APP_BLOCKED
+                && me["app_blocked"].is_boolean() =>
+        {
+            let word = if me["app_blocked"] == true {
+                "blocked"
+            } else {
+                "permitted"
+            };
+            format!("Incoming connection to {path} is {word}.")
+        }
+        (_, w) if program == "socketfilterfw" && w == firewall::LIST_APPS => {
+            let apps = me["apps"].as_array().cloned().unwrap_or_default();
+            let mut out = format!("Total number of apps = {} \n", apps.len());
+            for (i, app) in apps.iter().enumerate() {
+                let rule = if app["block"] == true {
+                    "Block"
+                } else {
+                    "Allow"
+                };
+                out += &format!(
+                    "{} : {} \n             ({rule} incoming connections)\n",
+                    i + 1,
+                    app["path"].as_str().unwrap()
+                );
+            }
+            out
+        }
+        // `codesign -dv <path>`, on stderr: `team` names the Developer ID's
+        // team; without it the signature is ad hoc.
+        (_, [flag, path]) if program == "codesign" && *flag == firewall::SIGNATURE => {
+            match me["team"].as_str() {
+                Some(team) => eprintln!(
+                    "Executable={}\nAuthority=Developer ID Application: Someone ({team})\nTeamIdentifier={team}",
+                    path
+                ),
+                None => eprintln!(
+                    "Executable={}\nSignature=adhoc\nTeamIdentifier=not set",
+                    path
+                ),
+            }
+            String::new()
         }
         // As the real CLI does with what it does not take.
         _ => {

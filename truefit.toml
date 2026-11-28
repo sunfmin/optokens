@@ -30,12 +30,18 @@ says = "Decision record 2's invariant stands: a secret's value is never in any p
 source = "docs/adr/0015-reach-1password-through-opcore.md:13"
 check = ["test"]
 
-# The Copy (ADR 0015), kept by tests/secrets.rs and tests/init.rs on the stand-in Core.
+# The Copy (ADRs 0015 and 0019), kept by tests/secrets.rs and tests/init.rs on the stand-in Core.
 
 [[promise]]
-name = "copy-answers-within-its-life"
-says = "`list`, `get` and `env` answer from it, with no network within its Life; `--fresh` syncs first."
-source = "docs/adr/0015-reach-1password-through-opcore.md:10"
+name = "reads-answer-from-the-copy-with-no-network"
+says = "`list`, `get` and `env` answer from the Copy with no network, however old it is, except a `get` or `env` of a Secret the Copy lacks, which syncs once, or no Copy yet."
+source = "docs/adr/0019-the-copy-syncs-on-demand.md:9"
+check = ["test"]
+
+[[promise]]
+name = "reaches-1password-only-on-demand"
+says = "optokens reaches 1Password only with `--fresh`, at a write (`put`, `rm`, `mv`), at a Secret the Copy lacks, or with no Copy yet: opcore's Copy on demand (`Syncs::OnDemand`, opcore's decision record 5)."
+source = "docs/adr/0019-the-copy-syncs-on-demand.md:10"
 check = ["test"]
 
 [[promise]]
@@ -180,4 +186,11 @@ check = ["test"]
 name = "link-https-or-http-with-why"
 says = "With a certificate from `tailscale cert` the link is HTTPS; when `tailscale cert` fails it is plain HTTP on the tailnet, and the reason printed with it gives the error and the fix: an admin runs `sudo tailscale set --operator=<user>`, and HTTPS Certificates are on for the tailnet."
 source = "docs/adr/0008-the-one-time-links-rules.md:23"
+check = ["test"]
+
+# Kept by tests/budget.rs, which asserts each command's calls and Budget and fails when docs/budget.md is stale.
+[[promise]]
+name = "commands-budget-recorded"
+says = "Every command's scenario on the stand-in Core asserts its Core calls and the reads, writes and account requests they spend, and `docs/budget.md` is their table: `tests/budget.rs` generates it, fails when it is stale, and `UPDATE_BUDGET=1` rewrites it."
+source = "docs/adr/0018-every-commands-budget-is-recorded.md:7"
 check = ["test"]

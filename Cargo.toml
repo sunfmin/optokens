@@ -6,9 +6,10 @@ publish = false
 
 [dependencies]
 agent-help = { git = "https://github.com/sunfmin/agent-cli", rev = "f506df826a97b2fd834e1d65b9057001a6a6e796" }
-opcore = { git = "https://github.com/sunfmin/opcore", rev = "5063c145c65acb03e3a8e5408a026a81a486ee6c" }
+opcore = { git = "https://github.com/sunfmin/opcore", rev = "1473bebcd776c731ef4a1301aec578c884e367fb" }
 form_urlencoded = "1.2.2"
 getrandom = "0.4.3"
+humantime = "2.4.0"
 clap = { version = "4.6.8", features = ["derive"] }
 # TLS for the one-time link; graviola is pure Rust, so every target builds with no C toolchain (ADR 0010).
 rustls = { version = "0.23.46", default-features = false, features = ["std", "tls12"] }

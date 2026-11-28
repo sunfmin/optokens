@@ -1,0 +1,7 @@
+{
+  "tree": "727e4af2da5259c4647bc98f8e8000850a86c262+d1fba762150c532c",
+  "picker": "codex:01a21feb-4607-7073-bd7b-737d4d5aae79:default",
+  "author": "claude-code:a8c76d45-64f1-5207-963c-cc1ca977f68c:opus",
+  "none": "The parser tests require both Allow and Block, the macOS doctor tests require a populated firewall result, and the remaining candidate requires Rule to implement Default.",
+  "added_lines": 26
+}

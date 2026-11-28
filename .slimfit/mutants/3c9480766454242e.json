@@ -1,0 +1,22 @@
+{
+  "tree": "746026ca8c328a8ac3c9efff4230efc99afae4ab+c866aea4ca52bf2a",
+  "picker": "codex:01a21d58-cfb7-7a23-a0b3-c2fcf9d9a911:default",
+  "author": "claude-code:40e84399-49ba-594a-9cbe-ef016d46ee6f:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/store.rs:85:23: replace match guard e.is_transient() with true in Store::sync_to_write",
+        "why": "The invalid-name test exits before Sync, so the shown tests may miss put or rm proceeding after a permanent Sync refusal such as a missing vault.",
+        "outcome": "killed",
+        "first_outcome": "survived"
+      },
+      {
+        "name": "src/store.rs:128:60: replace == with != in Store::all",
+        "why": "Both listed secrets have pending writes, so each can match the other secret’s pending ID under the inverted comparison and still appear correctly marked.",
+        "outcome": "killed",
+        "first_outcome": "survived"
+      }
+    ]
+  },
+  "added_lines": 113
+}

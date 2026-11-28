@@ -1,0 +1,10 @@
+{
+  "tree": "5950a4abe4290e9375b7e8c82fe2bde7f20c719f+dfd9c081114e35cb",
+  "lines": 157,
+  "serves": "optokens#39",
+  "considered": "src/tailscale.rs and doctor's run() reused for the firewall's CLIs (src/firewall.rs mirrors tailscale.rs, the one module of their command lines and answers); the stand-in examples/standin.rs extended rather than a second one; link_expired's existing Refusal kept, only its fix varies",
+  "reviewer": "codex:01a21f85-9ca5-7f20-a9b8-148f1bbeb1dd:default",
+  "author": "claude-code:24945d87-7cee-5b3f-92b5-1a13d941a25b:opus",
+  "cut": "In src/serve.rs, use an AtomicBool for whether any connection arrived, choose the expiry fault suffix and fix together, and pass them to one Refusal::of call. In src/firewall.rs, make SIGNATURE a single flag so src/doctor.rs can pass a two-element argument array without concatenating slices and examples/standin.rs can match the flag and path in one slice pattern.",
+  "answer": "Both made: serve.rs counts with an AtomicBool and builds one Refusal::of from the chosen suffix and fix; firewall::SIGNATURE is one flag, doctor passes [SIGNATURE, binary], the stand-in matches [flag, path]."
+}

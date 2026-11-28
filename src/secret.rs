@@ -27,7 +27,7 @@ pub enum Fault {
     BadMeta,
     /// `--show` names a label `--fields` does not, or is given without `--fields`. Fix: name each `--show` label in `--fields` too.
     BadShow,
-    /// No value was submitted on the one-time link before it expired, so nothing was stored. Fix: run the same `put` or `init` again, and open its new link sooner.
+    /// No value was submitted on the one-time link before it expired, so nothing was stored. Fix: run the same `put` or `init` again, and open its new link sooner. When no connection reached the link at all, the fault says so and the fix names `optokens doctor` first: macOS's firewall, or the tailnet's ACL, keeps the device out.
     LinkExpired,
     /// `--field-from-stdin` was given, but stdin is a terminal: a person would type into a prompt that shows nothing. Fix: pipe the value a command makes into `put`; a value a person knows waits for the one-time link.
     StdinTerminal,
@@ -53,7 +53,7 @@ pub enum Fault {
     NotOptokens,
     /// Two items in the vault are the same Secret. Fix: delete one of them in 1Password.
     Ambiguous,
-    /// 1Password refused or failed a call (no such vault, no grant, its rate limit), the network failed, or 1Password answered what optokens' Core cannot read. Fix: the one the finding names: `optokens init --check` for a grant, waiting for the budget `op service-account ratelimit` shows ran out for a rate limit (the token's refills within the hour, the account's within the day), updating optokens for an answer it cannot read.
+    /// 1Password refused or failed a call (no such vault, no grant, its rate limit), the network failed, or 1Password answered what optokens' Core cannot read, or a write met the changes another token staged. Fix: the one the finding names: `optokens init --check` for a grant, waiting for the budget `op service-account ratelimit` shows ran out for a rate limit (the token's refills within the hour, the account's within the day), updating optokens for an answer it cannot read, running with the token that staged those changes.
     VaultFailed,
 }
 
