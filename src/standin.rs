@@ -16,9 +16,10 @@
 //!   section `fields` emptied;
 //! - `core.hang_ms`: each item call waits this long before it answers;
 //! - `core.released`: each client id released, in order;
-//! - `calls`: every call, `{ "program": "core", "method", "ids", "seen" }`, where
-//!   `seen` is what any process could see then: every command line (`ps`)
-//!   and every file under `TMPDIR`.
+//! - `calls`: every call, `{ "program": "core", "method", "ids", "seen",
+//!   "failed" }`, where `seen` is what any process could see then: every
+//!   command line (`ps`) and every file under `TMPDIR`, and `failed` is true
+//!   for a call it refused (which spends none of the Budget).
 //!
 //! As the real Core does, it answers an item's fields sorted by id, a field
 //! in no section with the section id `""`, and that unnamed section.
@@ -72,6 +73,13 @@ impl Standin {
     }
 }
 
+/// Marks the call recorded last as refused, or not.
+fn failed(state: &mut Value, refused: bool) {
+    if let Some(call) = state["calls"].as_array_mut().and_then(|c| c.last_mut()) {
+        call["failed"] = json!(refused);
+    }
+}
+
 fn error(name: &str, message: &str) -> Failure {
     Failure::Error(json!({ "name": name, "message": message }).to_string())
 }
@@ -80,6 +88,7 @@ impl Core for Standin {
     fn init_client(&mut self, config: &str) -> Result<String, Failure> {
         let mut state = self.load();
         let recorded = self.record(&mut state, "init_client", &Value::Null);
+        failed(&mut state, recorded.is_err());
         self.save(&state);
         recorded?;
         let config: Value = serde_json::from_str(config).unwrap();
@@ -104,6 +113,7 @@ impl Core for Standin {
         let answer = recorded
             .and_then(|()| unknown_vault(&state, &method, p))
             .map(|()| answer(&mut state, &method, p));
+        failed(&mut state, answer.is_err());
         self.save(&state);
         if let Some(ms) = state["core"]["hang_ms"].as_u64() {
             std::thread::sleep(std::time::Duration::from_millis(ms));

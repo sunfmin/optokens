@@ -1,5 +1,5 @@
 #!/bin/sh
-# The fast gate (factorium.toml): fmt, clippy (native and for Windows), no crate that builds C, then slimfit runs the tests once and checks them against .slimfit/baseline.json, then docfit checks this repo's own documents, then the release script short of publishing, then the version a tagless clone stamps.
+# The fast gate (factorium.toml): fmt, clippy (native and for Windows), no crate that builds C, then slimfit runs the tests once and checks them against .slimfit/baseline.json, then truefit checks its stand-ins' contracts, then docfit checks this repo's own documents, then the release script short of publishing, then the version a tagless clone stamps.
 set -eu
 cd "$(dirname "$0")"
 [ -d "$HOME/.cargo/bin" ] && PATH="$HOME/.cargo/bin:$PATH"
@@ -18,6 +18,7 @@ for c in cc cmake; do
     fi
 done
 slimfit check
+truefit contract
 docfit check
 # The release script, as far as it goes without publishing: all five platforms
 # built, each binary's arch checked, the formula and the Scoop manifest written.

@@ -2,7 +2,7 @@
 
 Keeps an agent's secrets in a 1Password vault through a service account, and takes the secret values a person enters only through a one-time link served on the tailnet. It works on a Linux, macOS or Windows server with no desktop. It is a simpler sibling of mytokens and uses the same commands and words: Secret, Field, Profile, one-time link.
 
-It reaches 1Password through [opcore](https://github.com/sunfmin/opcore), which runs 1Password's SDK Core inside it: no 1Password CLI is needed. Install on macOS or Linux with `brew install sunfmin/tap/optokens`; on Windows with `scoop bucket add sunfmin https://github.com/sunfmin/scoop-bucket` and then `scoop install optokens`. `put --fields` and `init` also need `tailscale`. A release is cut by `packaging/release.sh`.
+It reaches 1Password through [opcore](https://github.com/sunfmin/opcore), which runs 1Password's SDK Core inside it: no 1Password CLI is needed. What each command spends of the service account's reads and writes and the account's daily requests is `docs/budget.md`. Install on macOS or Linux with `brew install sunfmin/tap/optokens`; on Windows with `scoop bucket add sunfmin https://github.com/sunfmin/scoop-bucket` and then `scoop install optokens`. `put --fields` and `init` also need `tailscale`. A release is cut by `packaging/release.sh`.
 
 The manual is `optokens --help`, and it is the only copy.
 

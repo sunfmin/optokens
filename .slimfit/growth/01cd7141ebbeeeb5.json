@@ -1,0 +1,10 @@
+{
+  "tree": "204c90950c25a47540fbd7f82866d7765cbe29b2+d1fba762150c532c",
+  "lines": 7,
+  "serves": "optokens#37",
+  "considered": "tests/secrets.rs' existing scenarios (they assert calls of other behaviour; folding Budget rows into them scatters the table's source), opcore's own budget test and stand-in Budget (test-only in opcore, not exported, so not reusable here), and a cost table of optokens' own (rejected: a copy of opcore's numbers)",
+  "reviewer": "codex:01a21f7a-776c-7853-bac9-b0745d5fa40e:default",
+  "author": "claude-code:ff7a004c-b37d-521c-94b3-6460da510577:opus",
+  "cut": "In tests/budget.rs, run list, get, and env from one argument table in two passes, preserving the warm-then-stale order and both sets of assertions. Use slice::chunk_by in calls() to preserve consecutive-call counts and delete the manual run accumulator. In tests/common/mod.rs, drop Host::budget and keep the costing module local to tests/budget.rs, where the row can compute spending directly from Host's call records.",
+  "answer": "Made all three: list/get/env run from one table in two passes (warm, then stale); calls() uses chunk_by; tests/common/budget.rs and Host::budget are gone, the costing lives in tests/budget.rs and sums Host::calls() directly. Steps are table rows too, with calls as space-separated strings. 397 added test lines down to 318."
+}
