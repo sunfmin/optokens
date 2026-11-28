@@ -9,7 +9,7 @@ Each process that reaches 1Password spends one of the account's 1000 requests a 
 ## Decision
 
 - `put`, `mv` and `rm` stage their change on this host, sealed in `copy.pending` beside the Copy, reaching no 1Password, and answer at once with `"pending": true`. A write is based on the Copy as held, its staged changes made; a value entered on the one-time link is staged the same way. `get`, `env` and `list` on this host show the change at once.
-- `optokens push` sends every staged change in one process, one of the account's requests: each Secret's changes folded into one write (opcore's push), each made on the item as 1Password holds it then, then the pull of a Sync. `--fresh`, and a read of a Secret the Copy lacks, push the same way when anything is staged.
+- `optokens push` sends every staged change in one process, one sign-in, its reads and writes the account's requests (decision record 23): each Secret's changes folded into one write (opcore's push), each made on the item as 1Password holds it then, then the pull of a Sync. `--fresh`, and a read of a Secret the Copy lacks, push the same way when anything is staged.
 - `--now` on `put`, `mv` and `rm` syncs first and writes through, as decision record 20 has every write do: for a change another host needs right away. Changes staged before it are pushed by its Sync. It spends what a write did before.
 - `list` marks a Secret with staged changes; each read warns on stderr of how many wait and that `optokens push` sends them. `optokens status` lists them: Secret, change, when.
 - Changes reach 1Password and other hosts only at a push. Until then they live only on this host: a host lost before a push loses them.
