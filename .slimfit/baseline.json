@@ -2,8 +2,8 @@
   "suites": {
     "rust": {
       "prod_lines": 3494,
-      "test_lines": 5281,
-      "tests": 125,
+      "test_lines": 5276,
+      "tests": 124,
       "failures": 0,
       "test_seconds": 0.007,
       "covered_lines": 2293,
@@ -19,11 +19,24 @@
       "reason": "optokens#1: the five picks are in the Windows-only Win32 reader of src/access.rs (cfg(windows)), compiled for x86_64-pc-windows-msvc but run by no test, as no host here runs Windows; debt for a Windows test run, which ratchets this away (ADR 0004)"
     }
   ],
-  "kept": [],
+  "kept": [
+    {
+      "suite": "rust",
+      "test": "optokens::secrets::put_and_rm_wait_on_this_host_while_1password_cannot_be_reached",
+      "hash": "ab23adbc10bfb0ba",
+      "reason": "No assertion maps onto put_list_get_env_rm_a_profile: that test checks a profile's put/get/env/rm round trip against a reachable vault; this one checks pending writes kept on this host while every Core method is rate-limited, list's pending marks, and the push keeping another host's Field. Folding the failing-vault setup into the round trip would change what it checks."
+    },
+    {
+      "suite": "rust",
+      "test": "optokens::secrets::a_waiting_write_is_pushed_by_the_next_put",
+      "hash": "044462b0e15539e3",
+      "reason": "Setups conflict: folding 'a read warns of what waits' and 'the next --now write pushes it' into a_write_the_vault_cannot_take_now_waits_and_the_next_sync_pushes_it was tried; after that test's another-token steps a read no longer warns and a --now write leaves 2 writes waiting, so the fold changes what one half checks (its list --fresh push or the other-token reads)."
+    }
+  ],
   "measured": {
     "rust": {
       "uncovered_lines": 57,
-      "test_seconds": 104.931
+      "test_seconds": 104.121
     }
   }
 }

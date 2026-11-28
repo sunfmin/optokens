@@ -1631,7 +1631,8 @@ fn a_waiting_write_is_pushed_by_the_next_put() {
 /// marks it and warns, naming `optokens push`, and `status` lists each
 /// change. `push` sends them all in one process, each Secret's changes
 /// folded into one write: two `put`s of one Secret are one `ItemsPut`, a
-/// new Secret and its `rm` reach 1Password not at all.
+/// new Secret and its `rm` reach 1Password not at all. `--fresh` on a read
+/// pushes what is staged before it syncs.
 #[test]
 fn writes_are_staged_and_push_sends_them_in_one_batch() {
     let host = host();
@@ -1768,22 +1769,17 @@ fn writes_are_staged_and_push_sends_them_in_one_batch() {
         Vec::<String>::new(),
         "nothing staged: no call"
     );
-}
 
-/// `--fresh` on a read pushes what is staged before it syncs.
-#[test]
-fn fresh_pushes_what_is_staged() {
-    let host = host();
-    assert_eq!(run(&host, &["put", "--now", "db", "--set", "A=1"]).code, 0);
+    // `--fresh` on a read pushes what is staged before it syncs.
     assert_eq!(
-        run(&host, &["put", "db", "--set", "A=2"]).json()["pending"],
+        run(&host, &["put", "changed", "--set", "A=4"]).json()["pending"],
         true
     );
-    assert_eq!(host.field_value("db", "A"), "1", "staged, not sent");
+    assert_eq!(host.field_value("changed", "A"), "2", "staged, not sent");
     calls(&host);
-    let got = run(&host, &["get", "db", "--field", "A", "--fresh"]);
-    assert_eq!((got.code, got.stdout.as_str()), (0, "2"), "{}", got.stderr);
+    let got = run(&host, &["get", "changed", "--field", "A", "--fresh"]);
+    assert_eq!((got.code, got.stdout.as_str()), (0, "4"), "{}", got.stderr);
     assert_eq!(calls(&host), synced(&["ItemsGetAll", "ItemsPut"]));
-    assert_eq!(host.field_value("db", "A"), "2");
+    assert_eq!(host.field_value("changed", "A"), "4");
     assert!(!host.config().join("copy.pending").exists());
 }
