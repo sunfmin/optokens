@@ -1,0 +1,40 @@
+{
+  "tree": "530f93be912fe9001608e50a2edee45f2d9452a9+d1fba762150c532c",
+  "picker": "codex:01a21fc5-4859-7de1-bb3d-159ea386cb64:default",
+  "author": "claude-code:dc5d0fb1-6360-5a59-bdef-475d97ac2e94:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/commands.rs:155:38: replace || with && in put_secret",
+        "why": "The bare-link test creates an unannotated Secret, so it may miss an annotated first put or a bare update that should still open the link.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/item.rs:249:24: replace match guard field.label == SINGLE with true in layout",
+        "why": "The Copy tests use correctly labeled single values, so they may miss accepting a mislabeled value when rereading a staged item.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/secret.rs:183:25: replace == with != in Name::flag",
+        "why": "The replacement cache-miss tests assert the error kind, so they may miss a retry hint that omits the flag for a non-default account.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/account.rs:279:19: replace match guard e.kind() == std::io::ErrorKind::NotFound with true in read",
+        "why": "The new push and status cases use readable configuration, so they may miss an I/O error being treated as an absent file.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  },
+  "removed_tests": {
+    "rust": [
+      "tests/secrets.rs:193: the_copy_answers_within_its_life_and_a_sync_gets_only_what_changed",
+      "tests/secrets.rs:278: past_its_life_a_read_whose_sync_fails_answers_from_the_copy_with_a_warning"
+    ]
+  },
+  "added_lines": 126
+}
