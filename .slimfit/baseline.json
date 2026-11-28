@@ -23,7 +23,7 @@
   "measured": {
     "rust": {
       "uncovered_lines": 54,
-      "test_seconds": 93.678
+      "test_seconds": 96.553
     }
   }
 }
