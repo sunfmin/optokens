@@ -1,4 +1,21 @@
 {
+  "1368e81aec80": {
+    "mark": "not",
+    "sentence": "Not taken in this bump: it gives up \"a write is never based on a stale item\", and a `put` of a name another host made since could create a second item; it is the owner's call, kept for its own issue.",
+    "source": "docs/adr/0016-a-write-1password-cannot-take-waits.md:14",
+    "why": "an option the record weighed (chosen or rejected), not a behaviour optokens promises; what was chosen is registered from the decision's own sentences"
+  },
+  "1911ce4793ff": {
+    "mark": "not",
+    "sentence": "Decided by the control tech lead for Felix: 「Chose: notes only, because the notes are what 1Password shows in its list, and the section was chosen for metadata only to avoid clashing with a Field label, which the notes cannot do.」",
+    "source": "docs/adr/0014-a-secrets-description-is-the-items-notes.md:3",
+    "why": "the decision's source quoted (the owner's or a lead's words, or the record it follows); the promises it makes are registered from the record's own sentences"
+  },
+  "1d5b4cc47bc2": {
+    "mark": "promise",
+    "sentence": "After that Sync, a write opcore answers as waiting (the rate limit, the network, 1Password down) is no failure: it waits sealed in `copy.pending`, opcore's warning goes to stderr, and the answer carries `\"pending\": true` (`false` for every write that went through, or no write). An agent that reads only stdout still learns that the vault does not hold it yet.",
+    "source": "docs/adr/0016-a-write-1password-cannot-take-waits.md:8"
+  },
   "1fbc33c0e16b": {
     "mark": "not",
     "sentence": "Only the four macOS and Linux targets the first spec named.",
@@ -11,6 +28,24 @@
     "source": "docs/adr/0007-a-person-enters-a-value-on-a-one-time-link.md:3",
     "why": "the owner's words quoted as the decision's source; the promises they make are registered from the ADR's own sentences"
   },
+  "28c2ac95e888": {
+    "mark": "not",
+    "sentence": "Stage, then `Copy::push` in the same command: a second `ItemsList` and `ItemsGetAll` after the Sync the command made, and a write 1Password refuses answers `Ok`, its refusal only a warning, so `put` could no longer refuse it.",
+    "source": "docs/adr/0020-a-command-that-writes-writes-through.md:13",
+    "why": "an option the record weighed (chosen or rejected), not a behaviour optokens promises; what was chosen is registered from the decision's own sentences"
+  },
+  "299d4b73cb48": {
+    "mark": "not",
+    "sentence": "The section only, as before.",
+    "source": "docs/adr/0014-a-secrets-description-is-the-items-notes.md:14",
+    "why": "an option the record weighed (chosen or rejected), not a behaviour optokens promises; what was chosen is registered from the decision's own sentences"
+  },
+  "2e81d65a31c8": {
+    "mark": "not",
+    "sentence": "Decided by the control session for Felix: 「Chose: the mytokens form, because Felix said 「标题去掉斜杠可以」 (2026-11-27) and it is the only form `op://` can address.」",
+    "source": "docs/adr/0013-a-vault-items-title-holds-no-slash.md:3",
+    "why": "the decision's source quoted (the owner's or a lead's words, or the record it follows); the promises it makes are registered from the record's own sentences"
+  },
   "340fd3aa7e3f": {
     "mark": "promise",
     "sentence": "The link listens only on the tailnet address `tailscale ip` names that is on one of this host's interfaces; with no `tailscale` or no such address it stores nothing, and its refusal names what is missing.",
@@ -22,6 +57,23 @@
     "source": "docs/adr/0015-reach-1password-through-opcore.md:22",
     "why": "ADR 0015's undo note, its test arrangement and its lead sentence (kept by no-process-reaches-1password), and ADR 0002's superseded promises (decision record 15 holds them now)"
   },
+  "426b3ff9976b": {
+    "mark": "not",
+    "sentence": "A cut built and published everything from the cutting host, its macOS binary aarch64 only and signed ad hoc by the linker.",
+    "source": "docs/adr/0022-macos-is-signed-and-notarized-by-the-taps-workflow.md:7",
+    "why": "context: what 1Password, opcore or an earlier cut did, not a promise optokens makes"
+  },
+  "43d3239ee418": {
+    "mark": "promise",
+    "sentence": "`init --check`'s probe that waits is refused at its check (`probe_written`, `probe_removed`): a write that reached only the local file proves no grant.",
+    "source": "docs/adr/0016-a-write-1password-cannot-take-waits.md:9"
+  },
+  "4b8e547ab3a4": {
+    "mark": "not",
+    "sentence": "A write through on every `put` when 1Password answers: one request a write, the cost this removes.",
+    "source": "docs/adr/0021-writes-are-staged-and-pushed-in-one-batch.md:20",
+    "why": "an option the record weighed (chosen or rejected), not a behaviour optokens promises; what was chosen is registered from the decision's own sentences"
+  },
   "4bb5ad4cd9a9": {
     "mark": "not",
     "sentence": "`optokens --help` is the manual and its only copy; keep it true whenever behaviour changes.",
@@ -32,17 +84,63 @@
     "sentence": "Felix, 2026-11-26: 「Chose: B, because a value given on the command line is not secret by optokens' own rule, and hiding it only makes the vault harder to read.」 (B: a Field's type follows how its value came in: not secret → `STRING`, secret → `CONCEALED`.)",
     "source": "docs/adr/0011-a-fields-type-follows-how-its-value-came-in.md:3"
   },
+  "4dcea7438245": {
+    "mark": "not",
+    "sentence": "Linux and Windows built by the tap's workflow too: its runner lacks zig and cargo-xwin, and every sibling's run would change.",
+    "source": "docs/adr/0022-macos-is-signed-and-notarized-by-the-taps-workflow.md:20",
+    "why": "an option the record weighed (chosen or rejected), not a behaviour optokens promises; what was chosen is registered from the decision's own sentences"
+  },
+  "50b23dbe42a7": {
+    "mark": "not",
+    "sentence": "`put`, `rm`, `mv` and `init`'s probe open the Store `For::Writing` (`src/store.rs`): the Copy with a Life that never ends, which opcore writes through.",
+    "source": "docs/adr/0020-a-command-that-writes-writes-through.md:7",
+    "why": "decision record 20, superseded by 21 for put, mv and rm; --now's write through, what it keeps, is registered from 21 (now-writes-through)"
+  },
   "56677bde418c": {
     "mark": "not",
     "sentence": "The tests run the real binary on a stand-in Core (`src/standin.rs`), built only without `--release` and used only when `OPTOKENS_STANDIN_STATE` names its state.",
     "source": "docs/adr/0015-reach-1password-through-opcore.md:15",
     "why": "ADR 0015's undo note, its test arrangement and its lead sentence (kept by no-process-reaches-1password), and ADR 0002's superseded promises (decision record 15 holds them now)"
   },
+  "56c2bbf387d8": {
+    "mark": "not",
+    "sentence": "Undo: every write's `--now` taken as given (`Writes::Now` in `src/commands.rs`'s `to_write` and `moved`).",
+    "source": "docs/adr/0021-writes-are-staged-and-pushed-in-one-batch.md:23",
+    "why": "the record's undo note, advice to whoever reverts it"
+  },
+  "5be1419bf1b4": {
+    "mark": "not",
+    "sentence": "Notes only: chosen.",
+    "source": "docs/adr/0014-a-secrets-description-is-the-items-notes.md:13",
+    "why": "an option the record weighed (chosen or rejected), not a behaviour optokens promises; what was chosen is registered from the decision's own sentences"
+  },
+  "5cefa802444d": {
+    "mark": "promise",
+    "sentence": "A Secret's item is titled `<service>`, or `<service>.<account>` when the account is not `default`: never a `/`, which `op read \"op://<vault>/<title>/...\"`",
+    "source": "docs/adr/0013-a-vault-items-title-holds-no-slash.md:5"
+  },
+  "631a040295d7": {
+    "mark": "not",
+    "sentence": "Each syncs first, so its reads are as on demand: a Life that never ends syncs only with no Copy yet.",
+    "source": "docs/adr/0020-a-command-that-writes-writes-through.md:7",
+    "why": "decision record 20, superseded by 21 for put, mv and rm; --now's write through, what it keeps, is registered from 21 (now-writes-through)"
+  },
+  "636baf3d377f": {
+    "mark": "not",
+    "sentence": "Decided by the tech lead for Felix: 「Chose: A, because it keeps optokens' rule as it is (a value only on pipes and in a child's environment, never in argv or a temp file): the shell puts only `/dev/fd/N` in argv.」",
+    "source": "docs/adr/0012-several-generated-secrets-each-on-a-pipe-of-its-own.md:3",
+    "why": "the decision's source quoted (the owner's or a lead's words, or the record it follows); the promises it makes are registered from the record's own sentences"
+  },
   "703ee8be453d": {
     "mark": "not",
     "sentence": "optokens reaches 1Password only through opcore, which runs 1Password's SDK Core inside optokens.",
     "source": "docs/adr/0015-reach-1password-through-opcore.md:9",
     "why": "ADR 0015's undo note, its test arrangement and its lead sentence (kept by no-process-reaches-1password), and ADR 0002's superseded promises (decision record 15 holds them now)"
+  },
+  "723121154d07": {
+    "mark": "promise",
+    "sentence": "`optokens push` sends every staged change in one process, one of the account's requests: each Secret's changes folded into one write (opcore's push), each made on the item as 1Password holds it then, then the pull of a Sync.",
+    "source": "docs/adr/0021-writes-are-staged-and-pushed-in-one-batch.md:12"
   },
   "756bd25d8a81": {
     "mark": "promise",
@@ -64,11 +162,49 @@
     "sentence": "A wrong path answers 404 and a method other than GET or POST 405; a POST with an empty field answers the form again, 400, with \"Every field needs a value.\"",
     "source": "docs/adr/0008-the-one-time-links-rules.md:17"
   },
+  "80540993d890": {
+    "mark": "promise",
+    "sentence": "A service may hold a `.` (`name.com`), so the title alone does not say the name: the section `optokens` holds it, in the fields `service` and `account`, and reading takes the name from them, never by splitting the title.",
+    "source": "docs/adr/0013-a-vault-items-title-holds-no-slash.md:7"
+  },
+  "8d88db36fdd4": {
+    "mark": "promise",
+    "sentence": "Changes reach 1Password and other hosts only at a push.",
+    "source": "docs/adr/0021-writes-are-staged-and-pushed-in-one-batch.md:15"
+  },
   "8dfa225fdaac": {
     "mark": "not",
     "sentence": "With a Life, every read past it reached 1Password and spent one of the account's daily requests, for no question the person asked; the account's 1000 ran out on 2026-11-27 (decision record 17).",
     "source": "docs/adr/0019-the-copy-syncs-on-demand.md:5",
     "why": "ADR 0019's context: why a Life cost requests, not what optokens does"
+  },
+  "9399ea77106d": {
+    "mark": "not",
+    "sentence": "Undo: open every Store on demand; writes then stage.",
+    "source": "docs/adr/0020-a-command-that-writes-writes-through.md:15",
+    "why": "the record's undo note, advice to whoever reverts it"
+  },
+  "985e7c1228f3": {
+    "mark": "promise",
+    "sentence": "Invariant: **the Developer ID identity and the notary key live only in sunfmin/homebrew-tap, and only its `release` workflow signs.**",
+    "source": "docs/adr/0022-macos-is-signed-and-notarized-by-the-taps-workflow.md:11"
+  },
+  "98980863ba57": {
+    "mark": "not",
+    "sentence": "With a Sync before every write, ten `put`s were ten processes, ten requests and ten writes.",
+    "source": "docs/adr/0021-writes-are-staged-and-pushed-in-one-batch.md:7",
+    "why": "context: what 1Password, opcore or an earlier cut did, not a promise optokens makes"
+  },
+  "994553e5a62f": {
+    "mark": "promise",
+    "sentence": "`--now` on `put`, `mv` and `rm` syncs first and writes through, as decision record 20 has every write do: for a change another host needs right away.",
+    "source": "docs/adr/0021-writes-are-staged-and-pushed-in-one-batch.md:13"
+  },
+  "9a638644180c": {
+    "mark": "not",
+    "sentence": "Until then they live only on this host: a host lost before a push loses them.",
+    "source": "docs/adr/0021-writes-are-staged-and-pushed-in-one-batch.md:15",
+    "why": "a cost staging discloses to the reader (what a lost host or a stale Copy loses), not a guarantee optokens keeps"
   },
   "9aa804054b37": {
     "mark": "not",
@@ -96,11 +232,43 @@
     "sentence": "The type changes only how 1Password shows a field: `get`, `env` and `list` give out the same as before.",
     "source": "docs/adr/0011-a-fields-type-follows-how-its-value-came-in.md:16"
   },
+  "a4cf0acc87cf": {
+    "mark": "promise",
+    "sentence": "A Copy that never synced cannot take a write: it fails, as it cannot tell a new name from one another host made.",
+    "source": "docs/adr/0017-a-write-whose-sync-cannot-reach-1password-waits-too.md:22"
+  },
+  "a5b5be05ce74": {
+    "mark": "promise",
+    "sentence": "The certificate and key come from `tailscale cert --cert-file - --key-file -`, on its stdout, never through a file.",
+    "source": "docs/adr/0010-tls-through-rustls-and-graviola.md:5"
+  },
+  "a5f67031c910": {
+    "mark": "not",
+    "sentence": "rustls does it; its crypto provider is graviola (`rustls-graviola`), which is Rust and assembly with no C, so every target builds with no C toolchain: the gate clippy-checks `x86_64-pc-windows-msvc` with plain `cargo`, which cannot compile *ring*'s C (it finds no `assert.h`, tried 2026-11-26), and aws-lc-rs needs a C toolchain and cmake.",
+    "source": "docs/adr/0010-tls-through-rustls-and-graviola.md:3",
+    "why": "why graviola was chosen; what it buys, every target building with plain cargo, is five-platforms' Windows clippy"
+  },
+  "abb83fd851ce": {
+    "mark": "not",
+    "sentence": "opcore 7278bfd (its decision record 6) stages every write of a Copy on demand: it reaches no 1Password until the tool pushes.",
+    "source": "docs/adr/0020-a-command-that-writes-writes-through.md:3",
+    "why": "context: what 1Password, opcore or an earlier cut did, not a promise optokens makes"
+  },
+  "ac3074e3f15c": {
+    "mark": "promise",
+    "sentence": "`put` opens the path and refuses it, before reading anything, unless it is a pipe once links are followed (`/dev/fd/N`, on Linux `/proc/self/fd/N`). A file, a terminal or a missing path is `not_a_pipe`, a refusal that names the Label and never the path: after a mistaken `Label=$(command)` the path is the value.",
+    "source": "docs/adr/0012-several-generated-secrets-each-on-a-pipe-of-its-own.md:7"
+  },
   "b26f6dba9782": {
     "mark": "not",
     "sentence": "A secret value is never in any process's command line and never in a temporary file.",
     "source": "docs/adr/0002-reach-1password-through-op.md:7",
     "why": "ADR 0015's undo note, its test arrangement and its lead sentence (kept by no-process-reaches-1password), and ADR 0002's superseded promises (decision record 15 holds them now)"
+  },
+  "b2aaf5a67d0c": {
+    "mark": "promise",
+    "sentence": "An edit template replaces the whole item, so it carries what optokens does not own: every other tag, section and field (mytokens' tags and sections; the notes until decision record 14), read past and never refused, as mytokens writes and reads this layout too (Felix, 2026-11-27: 「双向同步要」).",
+    "source": "docs/adr/0009-one-item-per-secret-metadata-in-its-own-section.md:9"
   },
   "c02625107ae2": {
     "mark": "not",
@@ -117,6 +285,24 @@
     "sentence": "optokens reaches 1Password only with `--fresh`, at a write (`put`, `rm`, `mv`), at a Secret the Copy lacks, or with no Copy yet: opcore's Copy on demand (`Syncs::OnDemand`, opcore's decision record 5).",
     "source": "docs/adr/0019-the-copy-syncs-on-demand.md:10"
   },
+  "cbd1c85bb909": {
+    "mark": "not",
+    "sentence": "optokens' `put`, `rm` and `mv` promise one write that reaches 1Password, or waits only when it cannot (decision records 16 and 17); staging them, an `optokens push` and a `--now` are a change of their own, on Felix's words of 2026-11-28 that opcore's record 6 quotes.",
+    "source": "docs/adr/0020-a-command-that-writes-writes-through.md:3",
+    "why": "decision record 20, superseded by 21 for put, mv and rm; --now's write through, what it keeps, is registered from 21 (now-writes-through)"
+  },
+  "cdd51cff57ca": {
+    "mark": "not",
+    "sentence": "1Password's item list shows the start of an item's notes under its title (`op item list` gives it as `additional_information`). With the Description in the section `optokens`, and the notes empty, the list showed titles only; Felix asked for the Description there (2026-11-27).",
+    "source": "docs/adr/0014-a-secrets-description-is-the-items-notes.md:5",
+    "why": "context: what 1Password, opcore or an earlier cut did, not a promise optokens makes"
+  },
+  "ce54dbb34885": {
+    "mark": "not",
+    "sentence": "Keep `<service>/<account>`. Rejected: `op://` cannot reach it, so a person or script holding only `op` cannot read a Secret.",
+    "source": "docs/adr/0013-a-vault-items-title-holds-no-slash.md:13",
+    "why": "an option the record weighed (chosen or rejected), not a behaviour optokens promises; what was chosen is registered from the decision's own sentences"
+  },
   "d15235a9d5b8": {
     "mark": "promise",
     "sentence": "A type is a change only for a Field this `put` sets, so a `put` that changes neither value nor type writes nothing.",
@@ -128,10 +314,38 @@
     "source": "docs/adr/0009-one-item-per-secret-metadata-in-its-own-section.md:3",
     "why": "the decision's quoted source; the same promise is registered from line 13 as label-never-collides-with-metadata"
   },
+  "dc346816320c": {
+    "mark": "promise",
+    "sentence": "`copy.pending` is sealed under the token as the Copy is, so decision record 2's invariant stands; it is never rebuilt, so the account topic says not to delete it.",
+    "source": "docs/adr/0016-a-write-1password-cannot-take-waits.md:10"
+  },
+  "df8557fb8195": {
+    "mark": "not",
+    "sentence": "Linux and Windows stay as decision record 4 has them, built and published from the cutting host: the tap's workflow takes only Mach-O files, so it needs no change.",
+    "source": "docs/adr/0022-macos-is-signed-and-notarized-by-the-taps-workflow.md:14",
+    "why": "how the cut publishes Linux and Windows, a release process, not optokens' behaviour"
+  },
+  "e293b64ccb57": {
+    "mark": "not",
+    "sentence": "Follows slimfit's decision record 13 (owner, 2026-11-22: 「把所有的工具都变成 universal」「把公开的工具全部在 GitHub CI 上签」), which every public tool factorium cuts keeps.",
+    "source": "docs/adr/0022-macos-is-signed-and-notarized-by-the-taps-workflow.md:3",
+    "why": "the decision's source quoted (the owner's or a lead's words, or the record it follows); the promises it makes are registered from the record's own sentences"
+  },
+  "e56c8a623533": {
+    "mark": "not",
+    "sentence": "A staged write sees only what this host's Copy holds: a Secret another host made since its last Sync is created again by a staged `put`, and an untagged item of its title is not seen.",
+    "source": "docs/adr/0021-writes-are-staged-and-pushed-in-one-batch.md:16",
+    "why": "a cost staging discloses to the reader (what a lost host or a stale Copy loses), not a guarantee optokens keeps"
+  },
   "ed3cdea1b429": {
     "mark": "promise",
     "sentence": "The page names the Secret (`<service>/<account>`) and its Description, and has one input per Field it asks for: plain text for a `--show` Field, a password input for the rest; a Field already set shows only \"already set\", its value never on the page, and every piece of text on it is HTML-escaped.",
     "source": "docs/adr/0008-the-one-time-links-rules.md:19"
+  },
+  "f0abba5a9db9": {
+    "mark": "promise",
+    "sentence": "`list` marks a Secret whose write waits `\"pending\": true`. Another host sees the write only once a Sync here has pushed it.",
+    "source": "docs/adr/0017-a-write-whose-sync-cannot-reach-1password-waits-too.md:20"
   },
   "f1ddb985d2b9": {
     "mark": "promise",
@@ -144,10 +358,21 @@
     "source": "docs/adr/0002-reach-1password-through-op.md:3",
     "why": "the owner's words quoted as the decision's source; the promises they make are registered from the ADR's own sentences"
   },
+  "f92ddaf20afd": {
+    "mark": "not",
+    "sentence": "`put --field-from-pipe \"<Label>=<path>\"`, repeatable, split on the first `=` as `--set` is, is written `Label=<(command)`: the shell runs the command and puts only its pipe's path on the command line.",
+    "source": "docs/adr/0012-several-generated-secrets-each-on-a-pipe-of-its-own.md:5",
+    "why": "describes the flag's syntax and what the shell does; put's refusal of anything but a pipe is the promise (field-from-pipe-takes-only-a-pipe)"
+  },
   "fa157242f70e": {
     "mark": "promise",
     "sentence": "Every command prints one JSON object on stdout; a failure is `{\"error\": …}` with a non-zero exit.",
     "source": "docs/adr/0001-one-json-object-but-get-and-env.md:5"
+  },
+  "fcbf0469ee0b": {
+    "mark": "promise",
+    "sentence": "A Sync is one list and one batch get of the items that changed, signed in to the vault id the Copy keeps: only its first Sync, or one whose kept id no longer names the vault, lists the vaults.",
+    "source": "docs/adr/0015-reach-1password-through-opcore.md:11"
   },
   "fdac7c74a0d1": {
     "mark": "not",
