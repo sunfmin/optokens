@@ -1,0 +1,39 @@
+{
+  "tree": "3b73b9b82b3cc8a41fede3ab35822000c62cf5a0+d1fba762150c532c",
+  "picker": "codex:01a21f9a-06b0-7b33-9022-0d211ce26dd1:default",
+  "author": "claude-code:f7501004-5639-540f-945a-cbcab1f9aed2:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/doctor.rs:83:9: replace Firewall::current -> Option<Firewall> with None",
+        "why": "Suppressing firewall discovery leaves the ordinary doctor result intact, so only the macOS integration cases can catch it.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/program.rs:51:21: replace match guard start.elapsed() >= bound with false in bounded",
+        "why": "A firewall probe that stalls could hold up doctor indefinitely, while the added stand-ins answer immediately.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/standin.rs:307:5: replace unknown_vault -> Result<(), Failure> with Ok(())",
+        "why": "The budget scenarios inject a write refusal, leaving open whether a call rejected for an unknown vault is still refused and excluded from spending.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/standin.rs:78:5: replace failed with ()",
+        "why": "The recorded method sequence stays the same, so the waiting-write budget assertion has to catch the charge for the refused call.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  },
+  "removed_tests": {
+    "rust": [
+      "tests/link.rs:237: a_link_not_submitted_in_time_stores_nothing"
+    ]
+  },
+  "added_lines": 175
+}
