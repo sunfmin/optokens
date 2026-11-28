@@ -1,5 +1,5 @@
 #!/bin/sh
-# The race of two cuts on one tap (optokens#46): release.sh push-file clones
+# The race of two cuts on one tap (the v0.1.13 cut, 2026-11-28, failed on it): release.sh push-file clones
 # a bare repo, another cut pushes its own formula before this one pushes, and
 # this one's formula still lands, on top of the other's. A stand-in `gh` clones
 # the bare repo and, once, pushes the other cut's commit right after the clone.
