@@ -1,7 +1,7 @@
 //! `put`, `get`, `env`, `list`, `mv`, `rm`, `push` and `status`: each reads
 //! what it needs, lets `secret` decide, and reaches the vault through
 //! `store`. `put`, `mv` and `rm` stage their change on this host; `push`, or
-//! a write's `--now`, sends what is staged (ADR 0020).
+//! a write's `--now`, sends what is staged (ADR 0021).
 
 use crate::account::Env;
 use crate::cli::Answer;

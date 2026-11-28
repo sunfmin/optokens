@@ -1,7 +1,7 @@
 //! The vault, through opcore (ADR 0015): finding, reading, writing and
 //! removing Secrets. It keeps opcore's sealed Copy of the items tagged
 //! `optokens` in the config directory, answers from it with no network on
-//! demand (ADR 0019), and stages each write there (ADR 0020): it reaches
+//! demand (ADR 0019), and stages each write there (ADR 0021): it reaches
 //! 1Password only at a push (`push`, a write's `--now`, `--fresh`), a
 //! Secret the Copy lacks, or with no Copy yet. No child process, no command line: a value
 //! leaves this process only inside the Core's encrypted requests.
@@ -122,7 +122,7 @@ impl Store {
     }
 
     /// `name`'s Secret as the Copy holds it, its staged changes made, with
-    /// no Sync but a first one: what a write is based on (ADR 0020).
+    /// no Sync but a first one: what a write is based on (ADR 0021).
     pub fn held(&mut self, name: &Name) -> Result<Option<Found>, Refusal> {
         let items = self.items()?;
         let others = self.copy.others().unwrap_or_default();
@@ -258,7 +258,7 @@ impl Store {
     }
 }
 
-/// When a write reaches 1Password (decision record 20).
+/// When a write reaches 1Password (decision records 20 and 21).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Writes {
     /// Staged on this host until a push: `put`, `mv` and `rm`, and every

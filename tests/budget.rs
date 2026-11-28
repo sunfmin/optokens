@@ -253,13 +253,7 @@ fn rows() -> Vec<Row> {
         &costs,
         &host,
         &[
-            (
-                push,
-                "list --fresh",
-                false,
-                "init_client ItemsList ItemsGetAll ItemsPut",
-                [3, 1, 1],
-            ),
+            (push, "list --fresh", false, EDIT, [3, 1, 1]),
             ("`rm --now`", "rm web --now", false, delete, [2, 1, 1]),
             ("`doctor`", "doctor", false, "", [0, 0, 0]),
         ],

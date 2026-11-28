@@ -45,7 +45,7 @@ opcore's sealed copy of the Vault's items tagged `optokens`, the file `copy` bes
 _Avoid_: cache.
 
 **Staged change**:
-What a `put`, `mv` or `rm` changes, kept on this host without reaching 1Password (decision record 20): opcore keeps it sealed in `copy.pending` beside the Copy, reads show it, `status` lists it, and the next Push sends it. The command answers `pending: true`. Unlike the Copy, never derived: the file is its only record until pushed.
+What a `put`, `mv` or `rm` changes, kept on this host without reaching 1Password (decision record 21): opcore keeps it sealed in `copy.pending` beside the Copy, reads show it, `status` lists it, and the next Push sends it. The command answers `pending: true`. Unlike the Copy, never derived: the file is its only record until pushed.
 _Avoid_: pending write (opcore's word for the same record), queue, draft.
 
 **Push**:
