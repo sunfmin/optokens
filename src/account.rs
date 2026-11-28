@@ -362,6 +362,23 @@ mod tests {
         assert_eq!(format!("{token:?}"), "Token(from OP_SERVICE_ACCOUNT_TOKEN)");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_token_in_the_environment_that_is_not_utf8_is_refused_as_unreadable() {
+        use std::os::unix::ffi::OsStringExt;
+        let env = Env {
+            token: Some(OsString::from_vec(vec![b'o', b'p', 0xff])),
+            ..env(Some("/nowhere"), None)
+        };
+        let refused = token(&env).unwrap_err();
+        assert_eq!(refused.kind, Some("unreadable"));
+        assert_eq!(refused.fault, "OP_SERVICE_ACCOUNT_TOKEN is not UTF-8 text");
+        assert_eq!(
+            refused.fix,
+            "set OP_SERVICE_ACCOUNT_TOKEN to the service account's token as 1Password shows it"
+        );
+    }
+
     #[test]
     fn without_a_vault_file_the_vault_is_optokens() {
         let dir = tempfile::tempdir().unwrap();
