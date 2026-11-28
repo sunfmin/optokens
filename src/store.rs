@@ -205,25 +205,20 @@ impl Store {
 
     /// Sends every change staged on this host to 1Password in one process,
     /// one of the account's requests, each Secret's changes folded into one
-    /// write, then pulls (opcore's push): how many changes went, how many
-    /// still wait.
-    pub fn push(&mut self) -> Result<Pushed, Refusal> {
+    /// write, then pulls (opcore's push): how many changes it sent, and how
+    /// many still wait.
+    pub fn push(&mut self) -> Result<(usize, usize), Refusal> {
         let pending = |copy: &mut Copy<Backend>| copy.pending().map(|p| p.len());
         let pushed = pending(&mut self.copy).and_then(|before| {
             self.copy.push()?;
             let left = pending(&mut self.copy)?;
-            Ok(Pushed {
-                sent: before.saturating_sub(left),
-                left,
-            })
+            Ok((before.saturating_sub(left), left))
         });
         pushed.map_err(|e| self.refused(e))
     }
 
-    /// Each change staged on this host, oldest first: its Secret
-    /// (`None` for one a staged removal hides), the item's title, the
-    /// change (`create`, `edit` or `delete`) and when it was made. No
-    /// network but a first Sync.
+    /// Each change staged on this host, oldest first. No network but a
+    /// first Sync.
     pub fn staged(&mut self) -> Result<Vec<Staged>, Refusal> {
         let pending = self.copy.pending().map_err(|e| self.refused(e))?;
         let items = match pending.is_empty() {
@@ -234,16 +229,16 @@ impl Store {
             let item = items.iter().find(|i| i.id == id)?;
             item::read(item).ok().map(|(name, _)| name)
         };
-        let mut staged: Vec<Staged> = (pending.iter())
+        let mut pending = pending;
+        pending.sort_by_key(|p| p.at);
+        Ok((pending.iter())
             .map(|p| Staged {
-                secret: secret(&p.id),
-                title: p.title.clone(),
+                secret: secret(&p.id).map(|n| n.to_string()),
+                item: p.title.clone(),
                 change: p.write,
-                at: p.at,
+                at: humantime::format_rfc3339_seconds(p.at).to_string(),
             })
-            .collect();
-        staged.sort_by_key(|s| s.at);
-        Ok(staged)
+            .collect())
     }
 
     /// opcore's error `e` as the refusal `vault_failed`, with its fix.
@@ -291,20 +286,16 @@ impl Written {
     }
 }
 
-/// What a push did: how many staged changes it sent (each Secret's folded
-/// into one write), and how many still wait.
-#[derive(Debug, PartialEq)]
-pub struct Pushed {
-    pub sent: usize,
-    pub left: usize,
-}
-
-/// A change staged on this host ([`Store::staged`]).
+/// A change staged on this host ([`Store::staged`]), as `status` answers
+/// it: its Secret (`None` for one a staged removal hides), its item's
+/// title, the change (`create`, `edit` or `delete`), and when it was made,
+/// RFC 3339 in UTC.
+#[derive(serde::Serialize)]
 pub struct Staged {
-    pub secret: Option<Name>,
-    pub title: String,
-    pub change: &'static str,
-    pub at: std::time::SystemTime,
+    secret: Option<String>,
+    item: String,
+    change: &'static str,
+    at: String,
 }
 
 /// The Core the Copy signs in on: 1Password's, made only when it first

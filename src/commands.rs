@@ -11,7 +11,7 @@ use crate::pipe;
 use crate::refusal::Refusal;
 use crate::secret::{self, Field, Kind, Name, Put, Visibility};
 use crate::serve::Endpoint;
-use crate::store::{Pushed, Store, Writes};
+use crate::store::{Store, Writes};
 use serde_json::{Value, json};
 use std::time::{Duration, SystemTime};
 
@@ -425,7 +425,7 @@ pub fn rm(env: &Env, service: &str, account: &str, now: bool) -> Answer {
 /// Sends every change staged on this host in one batch, then pulls.
 pub fn push(env: &Env) -> Answer {
     match Store::open(env, Writes::Staged).and_then(|mut s| s.push().map_err(|r| vec![r])) {
-        Ok(Pushed { sent, left }) => Answer::json(&json!({ "pushed": sent, "pending": left })),
+        Ok((sent, left)) => Answer::json(&json!({ "pushed": sent, "pending": left })),
         Err(faults) => Answer::refused(faults),
     }
 }
@@ -433,49 +433,7 @@ pub fn push(env: &Env) -> Answer {
 /// Each change staged on this host, oldest first.
 pub fn status(env: &Env) -> Answer {
     match Store::open(env, Writes::Staged).and_then(|mut s| s.staged().map_err(|r| vec![r])) {
-        Ok(staged) => Answer::json(&json!({
-            "pending": staged.iter().map(|s| json!({
-                "secret": s.secret.as_ref().map(Name::to_string),
-                "item": s.title,
-                "change": s.change,
-                "at": utc(s.at),
-            })).collect::<Vec<_>>(),
-        })),
+        Ok(staged) => Answer::json(&json!({ "pending": staged })),
         Err(faults) => Answer::refused(faults),
-    }
-}
-
-/// `at` as RFC 3339 in UTC, to the second: `2026-11-28T09:30:00Z`.
-fn utc(at: SystemTime) -> String {
-    let secs = at
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    let (days, rest) = (secs / 86400, secs % 86400);
-    // Howard Hinnant's civil_from_days, for days since 1970-01-01.
-    let z = days + 719_468;
-    let era = z / 146_097;
-    let doe = z % 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + u64::from(month <= 2);
-    let (h, m, s) = (rest / 3600, rest % 3600 / 60, rest % 60);
-    format!("{year:04}-{month:02}-{day:02}T{h:02}:{m:02}:{s:02}Z")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::utc;
-    use std::time::{Duration, SystemTime};
-
-    #[test]
-    fn utc_is_rfc_3339() {
-        let at = |secs| SystemTime::UNIX_EPOCH + Duration::from_secs(secs);
-        assert_eq!(utc(at(0)), "1970-01-01T00:00:00Z");
-        assert_eq!(utc(at(951_782_400)), "2000-02-29T00:00:00Z");
-        assert_eq!(utc(at(1_795_865_405)), "2026-11-28T11:30:05Z");
-        assert_eq!(utc(at(4_107_542_399)), "2100-02-28T23:59:59Z");
     }
 }
