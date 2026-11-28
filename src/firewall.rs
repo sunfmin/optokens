@@ -124,6 +124,11 @@ mod tests {
             app_blocked("Incoming connection to /x is blocked.\n"),
             Some(Rule::Block)
         );
+        assert_eq!(
+            app_blocked("Incoming connection to /x is not known.\n"),
+            None,
+            "a verdict neither permitted nor blocked is no rule"
+        );
         assert_eq!(app_blocked("Unknown option\n"), None);
         assert_eq!(app_blocked(""), None);
         let adhoc = "Executable=/x\nSignature=adhoc\nTeamIdentifier=not set\n";
