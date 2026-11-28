@@ -9,7 +9,7 @@ use crate::pipe;
 use crate::refusal::Refusal;
 use crate::secret::{self, Field, Kind, Name, Put, Visibility};
 use crate::serve::Endpoint;
-use crate::store::Store;
+use crate::store::{For, Store};
 use serde_json::{Value, json};
 use std::time::{Duration, SystemTime};
 
@@ -265,14 +265,15 @@ pub fn fresh_link(title: &str, description: Option<&str>, fields: Vec<link::Fiel
 /// The vault's Store for `put` and `rm`: synced first, or, when 1Password
 /// cannot be reached, as held, its writes waiting on this host.
 fn to_write(env: &Env) -> Result<Store, Vec<Refusal>> {
-    let mut store = Store::open(env)?;
+    let mut store = Store::open(env, For::Writing)?;
     store.sync_to_write().map_err(|r| vec![r])?;
     Ok(store)
 }
 
-/// The vault's Store, synced first when `fresh` (`--fresh`, and before `mv`).
-fn opened(env: &Env, fresh: bool) -> Result<Store, Vec<Refusal>> {
-    let mut store = Store::open(env)?;
+/// The vault's Store, synced first when `fresh` (`--fresh`, and before `mv`,
+/// which opens it `to` write).
+fn opened(env: &Env, fresh: bool, to: For) -> Result<Store, Vec<Refusal>> {
+    let mut store = Store::open(env, to)?;
     if fresh && let Err(e) = store.sync() {
         return Err(vec![store.refused(e)]);
     }
@@ -287,7 +288,7 @@ fn found(
     fresh: bool,
 ) -> Result<(Name, secret::Secret), Vec<Refusal>> {
     let name = Name::new(service, account).map_err(|r| vec![r])?;
-    let mut store = opened(env, fresh)?;
+    let mut store = opened(env, fresh, For::Reading)?;
     match store.find(&name).map_err(|r| vec![r])? {
         Some(found) => Ok((name, found.secret)),
         None => Err(vec![not_found(&name)]),
@@ -336,7 +337,7 @@ pub fn env(env: &Env, service: &str, account: &str, fresh: bool) -> Answer {
 
 /// Every Secret, never a value.
 pub fn list(env: &Env, fresh: bool) -> Answer {
-    match opened(env, fresh).and_then(|mut store| store.all()) {
+    match opened(env, fresh, For::Reading).and_then(|mut store| store.all()) {
         Ok(all) => Answer::json(&json!({
             "secrets": all.iter().map(|(n, s, pending)| {
                 let mut summary = secret::summary(n, s);
@@ -363,7 +364,7 @@ pub fn mv(env: &Env, from: (&str, &str), to: (&str, &str)) -> Answer {
 fn moved(env: &Env, from: (&str, &str), to: (&str, &str)) -> Result<Value, Vec<Refusal>> {
     let old = Name::new(from.0, from.1).map_err(|r| vec![r])?;
     let new = Name::new(to.0, to.1).map_err(|r| vec![r])?;
-    let mut store = opened(env, true)?;
+    let mut store = opened(env, true, For::Writing)?;
     let found = store.find(&old).map_err(|r| vec![r])?;
     let found = found.ok_or_else(|| vec![not_found(&old)])?;
     if store.find(&new).map_err(|r| vec![r])?.is_some() {

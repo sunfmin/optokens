@@ -2,9 +2,9 @@
 //! removing Secrets. It keeps opcore's sealed Copy of the items tagged
 //! `optokens` in the config directory, answers from it with no network on
 //! demand (ADR 0019): it reaches 1Password only at `--fresh`, a write, a
-//! Secret the Copy lacks, or with no Copy yet. It writes through the Copy's
-//! Client, which keeps
-//! what each write answered. No child process, no command line: a value
+//! Secret the Copy lacks, or with no Copy yet. A command that writes opens
+//! it to write through (ADR 0020), so each write reaches 1Password through
+//! the Copy's Client, which keeps what it answered. No child process, no command line: a value
 //! leaves this process only inside the Core's encrypted requests.
 
 use crate::account::{self, Env, Token};
@@ -14,6 +14,7 @@ use crate::secret::{Fault, Name, Secret};
 use opcore::core::{Core, Failure, Wasm};
 use opcore::{Copy, Error, Item, Syncs};
 use std::path::Path;
+use std::time::Duration;
 
 /// The command a read's warning names to push the writes that wait.
 pub const PUSH: &str = "optokens list --fresh";
@@ -23,6 +24,28 @@ pub const COPY_FILE: &str = "copy";
 /// why.
 pub const WAITS: &str =
     "stored on this host and written to the vault by the next command that reaches it";
+
+/// What a command opens the Store for (ADR 0020).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum For {
+    /// On demand: reads answer the Copy, a Secret it lacks syncs once.
+    Reading,
+    /// `put`, `rm`, `mv` and `init`'s probe, which sync first: each write
+    /// reaches 1Password at once, or waits when it cannot.
+    Writing,
+}
+
+impl For {
+    /// opcore stages every write of a Copy on demand (its decision record
+    /// 6) and writes through with a Life; a Life that never ends syncs only
+    /// as on demand does with no Copy, and these commands sync first.
+    fn syncs(self) -> Syncs {
+        match self {
+            For::Reading => Syncs::OnDemand { push: PUSH.into() },
+            For::Writing => Syncs::Life(Duration::MAX),
+        }
+    }
+}
 
 pub struct Store {
     copy: Copy<Backend>,
@@ -44,21 +67,21 @@ pub struct Found {
 impl Store {
     /// The service account's vault, refused with every fault the token, the
     /// vault file and the config directory have.
-    pub fn open(env: &Env) -> Result<Store, Vec<Refusal>> {
+    pub fn open(env: &Env, to: For) -> Result<Store, Vec<Refusal>> {
         let (token, vault) = account::find(env)?;
         let dir = account::config_dir(env).map_err(|r| vec![r])?;
-        Ok(Store::new(&token, vault.name, &dir))
+        Ok(Store::new(&token, vault.name, &dir, to))
     }
 
     /// The vault `vault`, reached with `token`, its Copy in `dir`.
-    pub fn new(token: &Token, vault: String, dir: &Path) -> Store {
+    pub fn new(token: &Token, vault: String, dir: &Path, to: For) -> Store {
         let copy = Copy::with_core(
             Backend::current(),
             &dir.join(COPY_FILE),
             token.value(),
             &vault,
             item::TAG,
-            Syncs::OnDemand { push: PUSH.into() },
+            to.syncs(),
         );
         Store {
             copy,
