@@ -4,6 +4,7 @@
 //! (`src/standin.rs`), its vault's items as the Core answers them.
 #![allow(dead_code)] // each test file uses part of it
 
+pub mod budget;
 pub mod link;
 
 use serde_json::{Value, json};
@@ -124,6 +125,11 @@ impl Host {
             .filter(|c| c["program"] == "core")
             .map(|c| c["method"].as_str().unwrap().to_string())
             .collect()
+    }
+
+    /// What the Core calls since the last [`Host::forget_calls`] spent.
+    pub fn budget(&self) -> budget::Budget {
+        budget::spent(self.calls().as_array().map_or(&[][..], |c| c))
     }
 
     /// Drops the calls recorded so far.

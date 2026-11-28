@@ -1,4 +1,7 @@
 # This repo's documents, each under its kind (`docfit check --help`).
+# docs/budget.md is data: tests/budget.rs generates it and fails when it is stale.
+ignore = ["docs/budget.md"]
+
 [documents]
 "CLAUDE.md" = "agent"
 "README.md" = "readme"
