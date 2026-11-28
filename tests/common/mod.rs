@@ -104,6 +104,18 @@ impl Host {
             .collect()
     }
 
+    /// The value of the Field `label` of the vault's item `title`, as
+    /// 1Password holds it.
+    pub fn field_value(&self, title: &str, label: &str) -> String {
+        let items = self.items();
+        let item = (items.as_array().unwrap().iter())
+            .find(|i| i["title"] == title)
+            .unwrap_or_else(|| panic!("no item {title}: {items}"));
+        let fields = item["fields"].as_array().unwrap();
+        let field = fields.iter().find(|f| f["title"] == label).unwrap();
+        field["value"].as_str().unwrap().to_string()
+    }
+
     /// The vault's items, as the Core answers them.
     pub fn items(&self) -> Value {
         let items = self.state()["core"]["items"].clone();

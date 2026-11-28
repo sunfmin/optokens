@@ -154,6 +154,7 @@ fn fail(host: &Host, fail: Value) {
 }
 
 const SYNC: &str = "init_client ItemsList";
+/// A `--now` write's Sync, then its edit, written through.
 const EDIT: &str = "init_client ItemsList ItemsGetAll ItemsPut";
 
 /// Every command's scenarios, in the order they run on two hosts.
@@ -174,22 +175,22 @@ fn rows() -> Vec<Row> {
                 [2, 0, 1],
             ),
             (
-                "`put` of a new Secret",
-                "put db --set A=1",
+                "`put --now` of a new Secret",
+                "put db --set A=1 --now",
                 false,
                 create,
                 [2, 1, 1],
             ),
             (
-                "`put` of what the Secret holds",
-                "put db --set A=1",
+                "`put --now` of what the Secret holds",
+                "put db --set A=1 --now",
                 false,
                 SYNC,
                 [1, 0, 1],
             ),
             (
-                "`put` of a changed Field",
-                "put db --set A=2",
+                "`put --now` of a changed Field",
+                "put db --set A=2 --now",
                 false,
                 EDIT,
                 [3, 1, 1],
@@ -234,19 +235,19 @@ fn rows() -> Vec<Row> {
         &host,
         &[
             (changed, "get db --field A --fresh", false, got, [1, 0, 1]),
-            ("`mv`", "mv db web", false, EDIT, [3, 1, 1]),
+            ("`mv --now`", "mv db web --now", false, EDIT, [3, 1, 1]),
         ],
     ));
     let limited = json!({ "name": "RateLimitExceeded", "message": "rate limit exceeded" });
     fail(&host, json!({ "ItemsPut": limited }));
-    let waits = "`put` of a changed Field while 1Password refuses writes (it waits)";
+    let waits = "`put --now` of a changed Field while 1Password refuses writes (it stays staged)";
     rows.extend(steps(
         &costs,
         &host,
-        &[(waits, "put web --set A=4", false, EDIT, [1, 0, 1])],
+        &[(waits, "put web --set A=4 --now", false, EDIT, [1, 0, 1])],
     ));
     fail(&host, Value::Null);
-    let push = "`list --fresh` that pushes that waiting write";
+    let push = "`list --fresh` that pushes that staged write";
     let delete = "init_client ItemsList ItemsDeleteAll";
     rows.extend(steps(
         &costs,
@@ -256,20 +257,61 @@ fn rows() -> Vec<Row> {
                 push,
                 "list --fresh",
                 false,
-                "init_client ItemsList ItemsPut",
+                "init_client ItemsList ItemsGetAll ItemsPut",
                 [3, 1, 1],
             ),
-            ("`rm`", "rm web", false, delete, [2, 1, 1]),
+            ("`rm --now`", "rm web --now", false, delete, [2, 1, 1]),
             ("`doctor`", "doctor", false, "", [0, 0, 0]),
         ],
     ));
+    rows.extend(staged(&costs, &host));
     let new = Host::new(&[], json!({ "core": {} }));
-    let first = "`put` of a new Secret, the first Sync on a new host";
+    let first = "`put --now` of a new Secret, the first Sync on a new host";
     let first_put = "init_client VaultsList ItemsList ItemsCreateAll";
     rows.extend(steps(
         &costs,
         &new,
-        &[(first, "put db --set A=1", false, first_put, [3, 1, 1])],
+        &[(first, "put db --set A=1 --now", false, first_put, [3, 1, 1])],
+    ));
+    rows
+}
+
+/// Changes staged, then pushed in one batch: 5 `put`s (3 new Secrets, 2
+/// changes of one there) and 2 `rm`s.
+fn staged(costs: &Costs, host: &Host) -> Vec<Row> {
+    for (service, value) in [("s1", "1"), ("s2", "1"), ("s3", "1")] {
+        let args = ["put", service, "--set", &format!("A={value}"), "--now"];
+        assert_eq!(host.run(&args, &[TOKEN], None).code, 0);
+    }
+    let puts =
+        "put n1 --set A=1, put n2 --set A=1, put n3 --set A=1, put s1 --set A=2, put s1 --set A=3";
+    let mut rows = Vec::new();
+    host.forget_calls();
+    for args in puts.split(", ").chain(["rm s2", "rm s3"]) {
+        let args: Vec<&str> = args.split_whitespace().collect();
+        let ran = host.run(&args, &[TOKEN], None);
+        assert_eq!(
+            (ran.code, &ran.json()["pending"]),
+            (0, &json!(true)),
+            "{args:?}"
+        );
+    }
+    rows.push(Row {
+        command: "5 `put`s (3 new Secrets, 2 changes of one there) and 2 `rm`s, staged".into(),
+        calls: host.core_calls(),
+        spent: spent(costs, &host.calls()),
+    });
+    assert_eq!(rows[0].calls, Vec::<String>::new());
+    rows.extend(steps(
+        costs,
+        host,
+        &[(
+            "`push` of those, each Secret's changes folded into one write",
+            "push",
+            false,
+            "init_client ItemsList ItemsGetAll ItemsCreateAll ItemsPut ItemsDeleteAll",
+            [5, 3, 1],
+        )],
     ));
     rows
 }

@@ -41,9 +41,13 @@ The 1Password service account optokens reaches the Vault as, through opcore. Its
 _Avoid_: API key, login.
 
 **Copy**:
-opcore's sealed copy of the Vault's items tagged `optokens`, the file `copy` beside the token file: `list`, `get` and `env` answer from it with no network however old it is; it syncs only at `--fresh`, a write, a Secret it lacks, or when there is none yet (decision record 19). Derived from the Vault, never its truth.
+opcore's sealed copy of the Vault's items tagged `optokens`, the file `copy` beside the token file: `list`, `get` and `env` answer from it with no network however old it is; it syncs only at `--fresh`, a push, a Secret it lacks, or when there is none yet (decision record 19). Derived from the Vault, never its truth.
 _Avoid_: cache.
 
-**Pending write**:
-A `put`, `mv` or `rm` 1Password could not take (no network, the rate limit, 1Password down), after its Sync or, for `put` and `rm`, when that Sync could not reach it: opcore keeps it sealed in `copy.pending` beside the Copy, reads show it, and the next Sync that reaches the Vault pushes it. The command answers `pending: true`. Unlike the Copy, never derived: the file is its only record until pushed.
-_Avoid_: queue, offline write.
+**Staged change**:
+What a `put`, `mv` or `rm` changes, kept on this host without reaching 1Password (decision record 20): opcore keeps it sealed in `copy.pending` beside the Copy, reads show it, `status` lists it, and the next Push sends it. The command answers `pending: true`. Unlike the Copy, never derived: the file is its only record until pushed.
+_Avoid_: pending write (opcore's word for the same record), queue, draft.
+
+**Push**:
+Sending every Staged change to the Vault in one process, one of the account's requests, each Secret's changes folded into one write, then a Sync: `optokens push`, a write's `--now`, `--fresh`. A change 1Password cannot take now stays staged.
+_Avoid_: flush, upload.

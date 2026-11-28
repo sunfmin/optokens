@@ -86,7 +86,8 @@ fn put_help_says_what_the_link_serves_where_for_how_long_and_what_it_answers() {
         "Stdout keeps only the final JSON answer",
         "## What it answers",
         "`link_expired`",
-        "When that Sync cannot reach 1Password, it reads the Secret from the Copy as held instead, and the write waits on this host",
+        "stages it as one item, only when that changes it, with no network",
+        "When that Sync cannot reach 1Password, it reads the Secret from the Copy as held instead, and the change stays staged",
     ] {
         assert!(help.contains(said), "put --help lacks {said:?}: {help}");
     }
