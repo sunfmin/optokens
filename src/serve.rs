@@ -18,7 +18,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, SystemTime};
 
@@ -57,9 +57,10 @@ impl Endpoint {
 
     /// Serves `link` until its one submission, which it answers, or its
     /// expiry, refused as `link_expired` with the fix of running `command`
-    /// again, and of `optokens doctor` first when no connection reached it. It prints the link on stderr first, saying it is to enter
-    /// `what`, with why it is plain HTTP when it is. Later requests are
-    /// answered "already used" until optokens exits.
+    /// again, and of `optokens doctor` first when no connection reached it.
+    /// It prints the link on stderr first, saying it is to enter `what`, with
+    /// why it is plain HTTP when it is. Later requests are answered "already
+    /// used" until optokens exits.
     pub fn serve(self, link: Link, what: &str, command: &str) -> Result<Values, Refusal> {
         let address = self.listener.local_addr().map_err(io_refusal)?;
         let port = address.port();
@@ -82,11 +83,11 @@ impl Endpoint {
         let (sent, values) = mpsc::channel();
         let link = Arc::new(Mutex::new(link));
         let listener = self.listener;
-        let reached = Arc::new(AtomicUsize::new(0));
+        let reached = Arc::new(AtomicBool::new(false));
         let counted = reached.clone();
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                counted.fetch_add(1, Ordering::Relaxed);
+                counted.store(true, Ordering::Relaxed);
                 let (link, sent, tls) = (link.clone(), sent.clone(), tls.clone());
                 std::thread::spawn(move || {
                     if let Some(values) = answer(stream, &link, tls) {
@@ -106,27 +107,30 @@ impl Endpoint {
     }
 }
 
-/// `link_expired` for the link of `title`, which `connections` reached: none
-/// is what a firewall or the tailnet's ACL in the way looks like.
-fn expired(title: &str, command: &str, connections: usize) -> Refusal {
-    let fault = format!(
-        "no value was submitted on the one-time link for `{title}` before it expired, so nothing was stored"
-    );
-    if connections == 0 {
-        Refusal::of(
-            &Fault::LinkExpired,
-            format!("{fault}; no connection reached it"),
+/// `link_expired` for the link of `title`; when no connection `reached` it,
+/// which is what a firewall or the tailnet's ACL in the way looks like, its
+/// fix names `optokens doctor` first.
+fn expired(title: &str, command: &str, reached: bool) -> Refusal {
+    let (unreached, fix) = if reached {
+        (
+            "",
+            format!("run the same `optokens {command}` again, and open its new link sooner"),
+        )
+    } else {
+        (
+            "; no connection reached it",
             format!(
                 "run `optokens doctor` (macOS's firewall), and see that the tailnet's ACL lets the device reach this host; then run the same `optokens {command}` again"
             ),
         )
-    } else {
-        Refusal::of(
-            &Fault::LinkExpired,
-            fault,
-            format!("run the same `optokens {command}` again, and open its new link sooner"),
-        )
-    }
+    };
+    Refusal::of(
+        &Fault::LinkExpired,
+        format!(
+            "no value was submitted on the one-time link for `{title}` before it expired, so nothing was stored{unreached}"
+        ),
+        fix,
+    )
 }
 
 fn io_refusal(e: std::io::Error) -> Refusal {

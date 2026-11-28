@@ -14,7 +14,7 @@ pub const ALLOW_SIGNED: &[&str] = &["--getallowsigned"];
 /// What prints each program the firewall has a rule for, and the rule.
 pub const LIST_APPS: &[&str] = &["--listapps"];
 /// What prints a binary's signature, on stderr, for the path that follows.
-pub const SIGNATURE: &[&str] = &["-dv"];
+pub const SIGNATURE: &str = "-dv";
 
 /// The firewall's rule for one program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

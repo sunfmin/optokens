@@ -199,12 +199,9 @@ fn check_firewall(fw: &Firewall, findings: &mut Vec<Refusal>) -> Value {
     let rule = ask(firewall::LIST_APPS)
         .ok()
         .and_then(|apps| firewall::rule(&apps, &binary));
-    let team = run(
-        &fw.codesign,
-        &[firewall::SIGNATURE, &[binary.as_str()]].concat(),
-    )
-    .ok()
-    .and_then(|ran| firewall::team(&ran.stderr));
+    let team = run(&fw.codesign, &[firewall::SIGNATURE, &binary])
+        .ok()
+        .and_then(|ran| firewall::team(&ran.stderr));
     let fault = match rule {
         Some(Rule::Allow) => None,
         Some(Rule::Block) => Some(format!(

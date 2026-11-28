@@ -116,15 +116,15 @@ fn main() {
         }
         // `codesign -dv <path>`, on stderr: `team` names the Developer ID's
         // team; without it the signature is ad hoc.
-        (_, w) if program == "codesign" && w.len() == 2 && w[..1] == *firewall::SIGNATURE => {
+        (_, [flag, path]) if program == "codesign" && *flag == firewall::SIGNATURE => {
             match me["team"].as_str() {
                 Some(team) => eprintln!(
                     "Executable={}\nAuthority=Developer ID Application: Someone ({team})\nTeamIdentifier={team}",
-                    w[1]
+                    path
                 ),
                 None => eprintln!(
                     "Executable={}\nSignature=adhoc\nTeamIdentifier=not set",
-                    w[1]
+                    path
                 ),
             }
             String::new()
