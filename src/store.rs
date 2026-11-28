@@ -203,9 +203,8 @@ impl Store {
         })
     }
 
-    /// Sends every change staged on this host to 1Password in one process,
-    /// one of the account's requests, each Secret's changes folded into one
-    /// write, then pulls (opcore's push): how many changes it sent, and how
+    /// Sends every change staged on this host to 1Password in batch calls,
+    /// each Secret's changes folded into one write, then pulls (opcore's push): how many changes it sent, and how
     /// many still wait.
     pub fn push(&mut self) -> Result<(usize, usize), Refusal> {
         let pending = |copy: &mut Copy<Backend>| copy.pending().map(|p| p.len());

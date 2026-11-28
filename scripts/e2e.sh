@@ -3,7 +3,8 @@
 # through opcore and the script checking it through the real `op`:
 # put (a Meta among it) -> list -> get -> env -> put again (upsert) -> `op read op://` -> a put over the item retitled as
 # an earlier optokens titled it -> a put over the Description in the section, as before the notes -> a put of two pipes
-# -> a put over mytokens' tags and section -> put --description "" -> rm, each answer checked, the item and its field
+# -> a put over mytokens' tags and section -> put --description "" -> staged puts and an rm, `status`, a Field both this
+# host and the vault changed, one `push` -> rm, each answer checked, the item and its field
 # types checked in the vault through `op item get`, `ps` sampled during the put for the value, and the config directory
 # (the sealed Copy) searched for it. Outside the gate: it needs the network and a token.
 #
@@ -12,8 +13,8 @@
 # The optokens Profile (read by the installed optokens) holds
 # OP_SERVICE_ACCOUNT_TOKEN, a service account's token for
 # the vault (default `sesame-scratch`). The token stays in this process's
-# environment. The script writes only the item `e2e-<n>` and removes
-# it on any exit; it refuses to run unless optokens resolves the vault named.
+# environment. The script writes only the items `e2e-<n>`, `e2e-<n>-new` and
+# `e2e-<n>-gone` and removes them on any exit; it refuses to run unless optokens resolves the vault named.
 set -eu
 
 profile=${1:?usage: scripts/e2e.sh <optokens-profile> [vault]}
@@ -54,9 +55,13 @@ op vault get "$vault" --format json | jq -e --arg v "$vault" '.name == $v' >/dev
 service=e2e-$(date +%s)
 title=$service
 name=$service/default
+new=$service-new
+gone=$service-gone
 cleanup() {
     rc=$?
-    "$bin" rm --now "$service" >/dev/null 2>&1 || op item delete "$title" --vault "$vault" >/dev/null 2>&1 || true
+    for s in "$service" "$new" "$gone"; do
+        "$bin" rm --now "$s" >/dev/null 2>&1 || op item delete "$s" --vault "$vault" >/dev/null 2>&1 || true
+    done
     left=$(op item list --vault "$vault" --format json | jq -r '[.[] | select(.title | startswith("e2e-"))] | length')
     printf '\ne2e: items titled e2e-* left in %s: %s\n' "$vault" "$left"
     [ "$rc" = 0 ] && [ "$left" = 0 ] && echo "e2e: ok"
@@ -265,6 +270,55 @@ echo "notes: $(notes "$item")"
 check "the notes are empty" '[.fields[] | select(.purpose == "NOTES") | .value // ""] == [""]' "$item"
 run list
 check "list shows no description" '[.secrets[] | select(.service == "'"$service"'") | .description] == [null]' "$out"
+
+say "optokens put --now $gone --set G=1  (there to be removed by a staged rm)"
+run put --now "$gone" --set "G=1"
+check "put --now created $gone" '.changed and .pending == false' "$out"
+say "optokens put $service --set A=5; put $service --set B=6; put $new --set X=1; rm $gone  (staged)"
+for args in "put $service --set A=5" "put $service --set B=6" "put $new --set X=1" "rm $gone"; do
+    # shellcheck disable=SC2086 # each a word list of names and KEY=value, no spaces in them
+    run $args
+    check "$args is staged" '.pending == true' "$out"
+done
+read_a=$(op read "op://$vault/$title/fields/A")
+[ "$read_a" = 3 ] || fail "a staged put reached the vault: A is '$read_a', not 3"
+! op item get "$new" --vault "$vault" >/dev/null 2>&1 || fail "a staged put of $new created it in the vault"
+op item get "$gone" --vault "$vault" >/dev/null 2>&1 || fail "a staged rm of $gone removed it from the vault"
+echo "ok: the vault holds none of the staged changes"
+run get "$service" --field A
+[ "$out" = 5 ] || fail "get on this host does not show the staged A=5"
+echo "ok: get on this host shows the staged change"
+say "optokens status"
+run status
+echo "$out"
+check "status lists the four staged changes, oldest first" '[.pending[] | [.secret, .item, .change]] == [["'"$name"'","'"$title"'","edit"],["'"$name"'","'"$title"'","edit"],["'"$new"'/default","'"$new"'","create"],[null,"'"$gone"'","delete"]]' "$out"
+say "op item edit $id fields.A=9 fields.NEW=8  (another host changes A, which this host staged, and NEW, which it did not)"
+op item edit "$id" --vault "$vault" 'fields.A=9' 'fields.NEW=8' >/dev/null
+say "optokens push"
+out=$("$bin" push 2>"$XDG_CONFIG_HOME/push.err") || { rc=$?; cat "$XDG_CONFIG_HOME/push.err"; fail "push exited $rc"; }
+pushed_err=$(cat "$XDG_CONFIG_HOME/push.err")
+rm -f "$XDG_CONFIG_HOME/push.err"
+echo "$out"
+printf '%s
+' "$pushed_err"
+check "push sent all four, none left" '. == {"pushed":4,"pending":0}' "$out"
+printf '%s
+' "$pushed_err" | grep '^warning:' | grep -qF "$service" || fail "push named no Field both changed in a warning: line"
+echo "ok: push named the Field both changed in a warning: line"
+item=$(op item get "$id" --vault "$vault" --format json)
+check "the vault's item: A this host's, B added, NEW the other host's" \
+    '([.fields[] | select(.section.label == "fields") | {(.label): .value}] | add) as $f | $f.A == "5" and $f.B == "6" and $f.NEW == "8"' "$item"
+item=$(op item get "$new" --vault "$vault" --format json)
+check "the vault holds $new, X=1" '[.fields[] | select(.section.label == "fields") | {(.label): .value}] == [{"X":"1"}]' "$item"
+! op item get "$gone" --vault "$vault" >/dev/null 2>&1 || fail "push did not remove $gone"
+echo "ok: push removed $gone"
+run status
+check "status is empty after the push" '.pending == []' "$out"
+run get "$service" --field NEW
+[ "$out" = 8 ] || fail "the push's Sync did not bring the other host's NEW=8 into the Copy"
+echo "ok: the push's Sync brought the other host's NEW into the Copy"
+run rm --now "$new"
+check "rm --now removed $new" '.changed' "$out"
 
 say "optokens rm $service"
 run rm --now "$service"

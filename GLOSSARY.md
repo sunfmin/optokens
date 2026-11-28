@@ -49,5 +49,5 @@ What a `put`, `mv` or `rm` changes, kept on this host without reaching 1Password
 _Avoid_: pending write (opcore's word for the same record), queue, draft.
 
 **Push**:
-Sending every Staged change to the Vault in one process, one of the account's requests, each Secret's changes folded into one write, then a Sync: `optokens push`, a write's `--now`, `--fresh`. A change 1Password cannot take now stays staged.
+Sending every Staged change to the Vault in one process, in batch calls, each Secret's changes folded into one write, then a Sync: `optokens push`, a write's `--now`, `--fresh`. A change 1Password cannot take now stays staged.
 _Avoid_: flush, upload.
