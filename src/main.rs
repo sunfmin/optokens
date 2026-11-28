@@ -6,6 +6,7 @@ mod account;
 mod cli;
 mod commands;
 mod doctor;
+mod firewall;
 mod init;
 mod item;
 mod link;

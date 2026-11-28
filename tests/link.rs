@@ -234,7 +234,7 @@ fn a_field_not_named_is_kept_and_shown_only_as_already_set() {
 }
 
 #[test]
-fn a_link_not_submitted_in_time_stores_nothing() {
+fn a_link_no_connection_reached_names_doctor_and_stores_nothing() {
     let host = tailnet(no_cert(), json!([]));
     let waiting = start(
         &host,
@@ -246,13 +246,34 @@ fn a_link_not_submitted_in_time_stores_nothing() {
     assert_eq!(kinds(&put.json()), ["link_expired"]);
     assert_eq!(
         put.json()["error"][0]["fault"],
+        "no value was submitted on the one-time link for `db/default` before it expired, so nothing was stored; no connection reached it"
+    );
+    assert_eq!(
+        put.json()["error"][0]["fix"],
+        "run `optokens doctor` (macOS's firewall), and see that the tailnet's ACL lets the device reach this host; then run the same `optokens put` again"
+    );
+    assert_eq!(host.core_calls(), FIRST_SYNC);
+}
+
+#[test]
+fn a_link_opened_but_not_submitted_in_time_says_open_it_sooner() {
+    let host = tailnet(no_cert(), json!([]));
+    let waiting = start(
+        &host,
+        &["put", "db", "--fields", "Password"],
+        &[("OPTOKENS_TEST_LINK_LIFETIME_MS", "1500")],
+    );
+    assert_eq!(waiting.request("GET", "").0, 200);
+    let put = waiting.finish();
+    assert_eq!(put.code, 2, "{}", put.stdout);
+    assert_eq!(
+        put.json()["error"][0]["fault"],
         "no value was submitted on the one-time link for `db/default` before it expired, so nothing was stored"
     );
     assert_eq!(
         put.json()["error"][0]["fix"],
         "run the same `optokens put` again, and open its new link sooner"
     );
-    assert_eq!(host.core_calls(), FIRST_SYNC);
 }
 
 #[test]

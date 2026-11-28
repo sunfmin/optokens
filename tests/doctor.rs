@@ -40,6 +40,7 @@ fn a_healthy_host_has_no_findings_and_no_program_is_given_the_token() {
             "vault": { "name": "optokens", "file": null },
             "tailscale": { "path": bin.join("tailscale"), "address": "100.64.0.7" },
             "cert": { "domains": ["build.tail1234.ts.net"] },
+            "firewall": null,
         })
     );
     assert_eq!(answer["next"], "nothing to fix: this host can run optokens");
@@ -211,4 +212,114 @@ fn a_host_off_its_tailnet_and_without_certs_says_so() {
     let (_, answer) = host.doctor(&[("OP_SERVICE_ACCOUNT_TOKEN", "x")]);
     assert_eq!(kinds(&answer), ["no_cert"], "{answer}");
     assert_eq!(answer["found"]["cert"], Value::Null);
+}
+
+/// This test binary's optokens, as the firewall lists it: its real path.
+#[cfg(target_os = "macos")]
+fn binary() -> String {
+    std::fs::canonicalize(env!("CARGO_BIN_EXE_optokens"))
+        .unwrap()
+        .display()
+        .to_string()
+}
+
+#[cfg(target_os = "macos")]
+fn firewalled(firewall: Value, codesign: Value) -> Host {
+    let mut state = healthy();
+    state["socketfilterfw"] = firewall;
+    state["codesign"] = codesign;
+    Host::new(&["tailscale", "socketfilterfw", "codesign"], state)
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_firewall_rule_blocking_the_binary_is_found_with_its_unblock_line() {
+    let host = firewalled(
+        json!({ "apps": [{ "path": "/usr/bin/nc" }, { "path": binary(), "block": true }] }),
+        json!({}),
+    );
+    let (code, answer) = host.doctor(&[("OP_SERVICE_ACCOUNT_TOKEN", "x")]);
+    assert_eq!(code, 0);
+    assert_eq!(kinds(&answer), ["firewall_blocks"], "{answer}");
+    let finding = &answer["findings"][0];
+    let fw = "/usr/libexec/ApplicationFirewall/socketfilterfw";
+    let b = binary();
+    assert_eq!(
+        finding["fix"],
+        format!(
+            "run `sudo {fw} --add {b} --unblockapp {b}`, or install a release signed with a Developer ID"
+        )
+    );
+    let fault = finding["fault"].as_str().unwrap();
+    assert!(
+        fault.contains(&format!("a rule blocking incoming connections to `{b}`")),
+        "{fault}"
+    );
+    assert!(
+        fault.ends_with("one-time links cannot be reached from other devices"),
+        "{fault}"
+    );
+    assert_eq!(
+        answer["found"]["firewall"],
+        json!({ "enabled": true, "binary": b, "rule": "block", "team": null })
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn an_ad_hoc_binary_without_a_rule_is_found_while_only_signed_software_is_let_in() {
+    let host = firewalled(json!({ "apps": [] }), json!({}));
+    let (_, answer) = host.doctor(&[("OP_SERVICE_ACCOUNT_TOKEN", "x")]);
+    assert_eq!(kinds(&answer), ["firewall_blocks"], "{answer}");
+    assert!(
+        answer["findings"][0]["fault"]
+            .as_str()
+            .unwrap()
+            .contains("which it is not (ad hoc, or unsigned)"),
+        "{answer}"
+    );
+    let calls: Vec<_> = host
+        .calls()
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["program"] != "tailscale")
+        .map(|c| (c["program"].clone(), c["args"].clone()))
+        .collect();
+    assert_eq!(
+        calls,
+        [
+            (json!("socketfilterfw"), json!(["--getglobalstate"])),
+            (json!("socketfilterfw"), json!(["--listapps"])),
+            (json!("codesign"), json!(["-dv", binary()])),
+            (json!("socketfilterfw"), json!(["--getallowsigned"])),
+        ]
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_binary_the_firewall_lets_in_is_no_finding() {
+    // Signed with a Developer ID while signed software is let in.
+    let signed = firewalled(json!({}), json!({ "team": "HL27PWAKDF" }));
+    let (_, answer) = signed.doctor(&[("OP_SERVICE_ACCOUNT_TOKEN", "x")]);
+    assert_eq!(answer["findings"], json!([]), "{answer}");
+    assert_eq!(answer["found"]["firewall"]["team"], "HL27PWAKDF");
+    // Ad hoc, but with a rule allowing it (`--unblockapp`).
+    let allowed = firewalled(json!({ "apps": [{ "path": binary() }] }), json!({}));
+    let (_, answer) = allowed.doctor(&[("OP_SERVICE_ACCOUNT_TOKEN", "x")]);
+    assert_eq!(answer["findings"], json!([]), "{answer}");
+    assert_eq!(answer["found"]["firewall"]["rule"], "allow");
+    // The firewall off.
+    let off = firewalled(json!({ "state": 0 }), json!({}));
+    let (_, answer) = off.doctor(&[("OP_SERVICE_ACCOUNT_TOKEN", "x")]);
+    assert_eq!(answer["findings"], json!([]), "{answer}");
+    assert_eq!(answer["found"]["firewall"], json!({ "enabled": false }));
+    // Signed, but no downloaded software is let in by itself.
+    let strict = firewalled(
+        json!({ "allow_signed": false }),
+        json!({ "team": "HL27PWAKDF" }),
+    );
+    let (_, answer) = strict.doctor(&[("OP_SERVICE_ACCOUNT_TOKEN", "x")]);
+    assert_eq!(kinds(&answer), ["firewall_blocks"], "{answer}");
 }

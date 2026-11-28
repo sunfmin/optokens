@@ -203,6 +203,8 @@ impl Host {
             .env("HOME", self.dir.path().join("home"))
             .env("TMPDIR", self.dir.path().join("tmp"))
             .env("OPTOKENS_STANDIN_STATE", self.state_file())
+            // macOS's firewall is asked through the stand-ins in bin, never the real one.
+            .env("OPTOKENS_TEST_MACOS_TOOLS", self.dir.path().join("bin"))
             .envs(env.iter().copied())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

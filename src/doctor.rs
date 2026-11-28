@@ -1,14 +1,17 @@
 //! `optokens doctor`: whether this host can run optokens. It reads `PATH`,
-//! the service account's token and vault, and `tailscale`, changes nothing,
-//! and answers each finding with its fix. 1Password needs no program: opcore
+//! the service account's token and vault, `tailscale`, and on macOS the
+//! application firewall, changes nothing, and answers each finding with its
+//! fix. 1Password needs no program: opcore
 //! runs its Core inside optokens (ADR 0015).
 
 use crate::account::{self, Env};
+use crate::firewall::{self, Rule};
 use crate::program::{self, Ran};
-use crate::refusal::Refusal;
+use crate::refusal::{Refusal, quoted};
 use crate::tailscale;
 use serde_json::{Value, json};
 use std::ffi::OsString;
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
@@ -24,6 +27,8 @@ pub enum Finding {
     NoTailnetAddress,
     /// The tailnet has no HTTPS certificates for this host (`tailscale status --json` lists no `CertDomains`), so `tailscale cert` cannot be used and a link is served without TLS. Fix: turn on MagicDNS and HTTPS Certificates in the tailnet's DNS settings of the Tailscale admin console.
     NoCert,
+    /// macOS's application firewall refuses connections to this optokens binary: it has a rule blocking it (`socketfilterfw --listapps`), or no rule while its signature is not one the firewall lets in by itself (ad hoc, or no Developer ID while only signed software is let in), and with no one at the desktop to answer its prompt, each connection is refused. One-time links cannot then be reached from other devices. A `brew upgrade` moves the binary to a new path, which has no rule. Fix: the `sudo socketfilterfw --add <path> --unblockapp <path>` line it gives, or a release signed with a Developer ID.
+    FirewallBlocks,
 }
 
 /// `tailscale` is not on `PATH`.
@@ -48,14 +53,46 @@ pub fn no_tailnet_address(why: &str) -> Refusal {
 pub struct World {
     pub env: Env,
     pub path: Option<OsString>,
+    /// On macOS, what doctor reads the firewall with.
+    pub firewall: Option<Firewall>,
 }
+
+/// The firewall's CLI, `codesign`, and this binary's real path.
+pub struct Firewall {
+    pub socketfilterfw: PathBuf,
+    pub codesign: PathBuf,
+    pub binary: PathBuf,
+}
+
+/// The environment variable a test sets to the directory that holds its
+/// stand-ins for `socketfilterfw` and `codesign`; the manual does not list it.
+const TEST_TOOLS: &str = "OPTOKENS_TEST_MACOS_TOOLS";
 
 impl World {
     pub fn current() -> World {
         World {
             env: Env::current(),
             path: std::env::var_os("PATH"),
+            firewall: cfg!(target_os = "macos").then(Firewall::current).flatten(),
         }
+    }
+}
+
+impl Firewall {
+    fn current() -> Option<Firewall> {
+        let (socketfilterfw, codesign) = match std::env::var_os(TEST_TOOLS) {
+            Some(dir) => {
+                let dir = PathBuf::from(dir);
+                (dir.join("socketfilterfw"), dir.join("codesign"))
+            }
+            None => (firewall::SOCKETFILTERFW.into(), firewall::CODESIGN.into()),
+        };
+        let binary = std::env::current_exe().ok()?.canonicalize().ok()?;
+        Some(Firewall {
+            socketfilterfw,
+            codesign,
+            binary,
+        })
     }
 }
 
@@ -77,12 +114,16 @@ pub fn doctor(world: &World) -> Value {
         }
     };
     let (address, cert) = check_tailscale(world, &mut findings);
+    let firewall = world
+        .firewall
+        .as_ref()
+        .map_or(Value::Null, |f| check_firewall(f, &mut findings));
     let next = findings.first().map_or_else(
         || "nothing to fix: this host can run optokens".to_string(),
         |f| f.fix.clone(),
     );
     json!({
-        "found": { "token": token, "vault": vault, "tailscale": address, "cert": cert },
+        "found": { "token": token, "vault": vault, "tailscale": address, "cert": cert, "firewall": firewall },
         "findings": findings,
         "next": next,
     })
@@ -138,4 +179,64 @@ fn check_tailscale(world: &World, findings: &mut Vec<Refusal>) -> (Value, Value)
         }
     };
     (address, cert)
+}
+
+/// Whether macOS's firewall lets connections reach this binary: null when
+/// there is no `socketfilterfw` to ask, else `enabled`, and when it is on,
+/// the `binary`, its `rule` and the `team` that signed it.
+fn check_firewall(fw: &Firewall, findings: &mut Vec<Refusal>) -> Value {
+    if !fw.socketfilterfw.is_file() {
+        return Value::Null;
+    }
+    let ask = |args: &[&str]| run(&fw.socketfilterfw, args).map(|ran| ran.stdout);
+    let Ok(state) = ask(firewall::GLOBAL_STATE) else {
+        return Value::Null;
+    };
+    if !firewall::enabled(&state) {
+        return json!({ "enabled": false });
+    }
+    let binary = fw.binary.display().to_string();
+    let rule = ask(firewall::LIST_APPS)
+        .ok()
+        .and_then(|apps| firewall::rule(&apps, &binary));
+    let team = run(&fw.codesign, &[firewall::SIGNATURE, &binary])
+        .ok()
+        .and_then(|ran| firewall::team(&ran.stderr));
+    let fault = match rule {
+        Some(Rule::Allow) => None,
+        Some(Rule::Block) => Some(format!(
+            "macOS's firewall has a rule blocking incoming connections to `{binary}` (`socketfilterfw --listapps`)"
+        )),
+        None => {
+            let signed =
+                ask(firewall::ALLOW_SIGNED).is_ok_and(|s| firewall::allows_downloaded_signed(&s));
+            match (&team, signed) {
+                (Some(_), true) => None,
+                (Some(team), false) => Some(format!(
+                    "macOS's firewall is on, has no rule for `{binary}`, and lets no downloaded software in by itself, though team {team} signed it"
+                )),
+                (None, _) => Some(format!(
+                    "macOS's firewall is on, has no rule for `{binary}`, and lets in by itself only software signed with a Developer ID, which it is not (ad hoc, or unsigned)"
+                )),
+            }
+        }
+    };
+    if let Some(fault) = fault {
+        let path = quoted(&fw.binary);
+        findings.push(Refusal::of(
+            &Finding::FirewallBlocks,
+            format!(
+                "{fault}: with no one at the desktop to answer its prompt, each connection is refused, so one-time links cannot be reached from other devices"
+            ),
+            format!(
+                "run `sudo {} --add {path} --unblockapp {path}`, or install a release signed with a Developer ID",
+                firewall::SOCKETFILTERFW
+            ),
+        ));
+    }
+    let rule = rule.map(|r| match r {
+        Rule::Allow => "allow",
+        Rule::Block => "block",
+    });
+    json!({ "enabled": true, "binary": fw.binary, "rule": rule, "team": team })
 }
