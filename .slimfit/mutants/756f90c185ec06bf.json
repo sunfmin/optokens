@@ -1,0 +1,33 @@
+{
+  "tree": "fd85d106b7f252d7164f16241177450b6c5dba8a+d1fba762150c532c",
+  "picker": "codex:01a22072-8eeb-7e12-85a2-4097842a94ea:default",
+  "author": "claude-code:e73aa68c-1235-5164-ad70-ce6d30069317:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/standin.rs:62:35: replace == with != in Standin::record",
+        "why": "Reversing the opt-in may pass if watched tests only check that secrets are absent and ordinary tests ignore the extra snapshots.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/standin.rs:270:5: replace seen -> Value with Default::default()",
+        "why": "Even with watch enabled, the secrecy assertions could pass on null unless they require a populated snapshot.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/account.rs:279:19: replace match guard e.kind() == std::io::ErrorKind::NotFound with true in read",
+        "why": "The new test checks invalid UTF-8 in the environment, so treating other token-file I/O errors as a missing file may still go unnoticed.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  },
+  "removed_tests": {
+    "rust": [
+      "tests/secrets.rs:1775: fresh_pushes_what_is_staged"
+    ]
+  },
+  "added_lines": 4
+}

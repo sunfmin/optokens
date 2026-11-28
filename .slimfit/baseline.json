@@ -1,52 +1,52 @@
 {
+  "suites": {
+    "rust": {
+      "prod_lines": 3497,
+      "test_lines": 5340,
+      "tests": 126,
+      "failures": 0,
+      "test_seconds": 0.007,
+      "covered_lines": 2302,
+      "uncovered_lines": 0
+    }
+  },
+  "loosened": [
+    {
+      "suite": "rust",
+      "metric": "survived_mutants",
+      "from": 0.0,
+      "to": 5.0,
+      "reason": "optokens#1: the five picks are in the Windows-only Win32 reader of src/access.rs (cfg(windows)), compiled for x86_64-pc-windows-msvc but run by no test, as no host here runs Windows; debt for a Windows test run, which ratchets this away (ADR 0004)"
+    }
+  ],
   "kept": [
     {
-      "hash": "ab23adbc10bfb0ba",
-      "reason": "No assertion maps onto put_list_get_env_rm_a_profile: that test checks a profile's put/get/env/rm round trip against a reachable vault; this one checks pending writes kept on this host while every Core method is rate-limited, list's pending marks, and the push keeping another host's Field. Folding the failing-vault setup into the round trip would change what it checks.",
       "suite": "rust",
-      "test": "optokens::secrets::put_and_rm_wait_on_this_host_while_1password_cannot_be_reached"
+      "test": "optokens::secrets::put_and_rm_wait_on_this_host_while_1password_cannot_be_reached",
+      "hash": "ab23adbc10bfb0ba",
+      "reason": "No assertion maps onto put_list_get_env_rm_a_profile: that test checks a profile's put/get/env/rm round trip against a reachable vault; this one checks pending writes kept on this host while every Core method is rate-limited, list's pending marks, and the push keeping another host's Field. Folding the failing-vault setup into the round trip would change what it checks."
     },
     {
-      "hash": "044462b0e15539e3",
-      "reason": "Setups conflict: folding 'a read warns of what waits' and 'the next --now write pushes it' into a_write_the_vault_cannot_take_now_waits_and_the_next_sync_pushes_it was tried; after that test's another-token steps a read no longer warns and a --now write leaves 2 writes waiting, so the fold changes what one half checks (its list --fresh push or the other-token reads).",
       "suite": "rust",
-      "test": "optokens::secrets::a_waiting_write_is_pushed_by_the_next_put"
+      "test": "optokens::secrets::a_waiting_write_is_pushed_by_the_next_put",
+      "hash": "044462b0e15539e3",
+      "reason": "Setups conflict: folding 'a read warns of what waits' and 'the next --now write pushes it' into a_write_the_vault_cannot_take_now_waits_and_the_next_sync_pushes_it was tried; after that test's another-token steps a read no longer warns and a --now write leaves 2 writes waiting, so the fold changes what one half checks (its list --fresh push or the other-token reads)."
     }
   ],
   "kept_files": [
     {
-      "commits_90d": 20,
-      "commits_total": 20,
+      "suite": "rust",
       "file": "src/secret.rs",
       "prod_lines": 481,
-      "reason": "Deep enough: the pure core of a Secret (Name, Kind, Values, Field, Fault) and the decisions put/get/env/list make on it behind a few functions (parse_set/parse_meta/stdin_value/pipe_field for put's inputs, merge, value, to_json/summary, exports), each doing real work (merge finds every fault at once and upserts Fields in order). Callers in commands.rs/item.rs/store.rs use only that interface; tests reach no private helper. Size is ~60 lines of Fault docs (the manual's refusal table) plus refusal wording; churn is features adding inputs and faults to the domain core, which belong here. Splitting put's input parsing out would spread one concept over two modules for no leverage.",
-      "suite": "rust"
-    }
-  ],
-  "loosened": [
-    {
-      "from": 0.0,
-      "metric": "survived_mutants",
-      "reason": "optokens#1: the five picks are in the Windows-only Win32 reader of src/access.rs (cfg(windows)), compiled for x86_64-pc-windows-msvc but run by no test, as no host here runs Windows; debt for a Windows test run, which ratchets this away (ADR 0004)",
-      "suite": "rust",
-      "to": 5.0
+      "commits_90d": 20,
+      "commits_total": 20,
+      "reason": "Deep enough: the pure core of a Secret (Name, Kind, Values, Field, Fault) and the decisions put/get/env/list make on it behind a few functions (parse_set/parse_meta/stdin_value/pipe_field for put's inputs, merge, value, to_json/summary, exports), each doing real work (merge finds every fault at once and upserts Fields in order). Callers in commands.rs/item.rs/store.rs use only that interface; tests reach no private helper. Size is ~60 lines of Fault docs (the manual's refusal table) plus refusal wording; churn is features adding inputs and faults to the domain core, which belong here. Splitting put's input parsing out would spread one concept over two modules for no leverage."
     }
   ],
   "measured": {
     "rust": {
-      "test_seconds": 104.931,
-      "uncovered_lines": 57
-    }
-  },
-  "suites": {
-    "rust": {
-      "covered_lines": 2293,
-      "failures": 0,
-      "prod_lines": 3494,
-      "test_lines": 5281,
-      "test_seconds": 0.007,
-      "tests": 125,
-      "uncovered_lines": 0
+      "uncovered_lines": 51,
+      "test_seconds": 10.087
     }
   }
 }
