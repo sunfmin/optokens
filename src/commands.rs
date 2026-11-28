@@ -1,5 +1,7 @@
-//! `put`, `get`, `env`, `list`, `mv` and `rm`: each reads what it needs, lets
-//! `secret` decide, and reaches the vault through `store`.
+//! `put`, `get`, `env`, `list`, `mv`, `rm`, `push` and `status`: each reads
+//! what it needs, lets `secret` decide, and reaches the vault through
+//! `store`. `put`, `mv` and `rm` stage their change on this host; `push`, or
+//! a write's `--now`, sends what is staged (ADR 0021).
 
 use crate::account::Env;
 use crate::cli::Answer;
@@ -9,7 +11,7 @@ use crate::pipe;
 use crate::refusal::Refusal;
 use crate::secret::{self, Field, Kind, Name, Put, Visibility};
 use crate::serve::Endpoint;
-use crate::store::{For, Store};
+use crate::store::{Store, Writes};
 use serde_json::{Value, json};
 use std::time::{Duration, SystemTime};
 
@@ -46,6 +48,9 @@ pub struct PutArgs {
     /// Labels of `--fields` whose inputs show what is typed: for values that are not secret.
     #[arg(long, value_name = "Label,...", verbatim_doc_comment)]
     show: Option<String>,
+    /// Pushes to 1Password before it answers: this change, and every one staged before it.
+    #[arg(long, verbatim_doc_comment)]
+    now: bool,
 }
 
 /// Upserts the Fields `args` names. `terminal` is whether stdin is one, and
@@ -141,10 +146,11 @@ fn put_secret(
     let (Some(name), true) = (name, faults.is_empty()) else {
         return Err(faults);
     };
-    // The Copy syncs first, so no write is based on a stale item; when
-    // 1Password cannot be reached, the write goes on from the Copy and waits.
-    let mut store = to_write(env)?;
-    let found = store.find(&name).map_err(|r| vec![r])?;
+    // Staged, the write is based on the Copy as held; with `--now` it
+    // syncs first, and when 1Password cannot be reached goes on from the
+    // Copy and stays staged.
+    let mut store = to_write(env, args.now)?;
+    let found = store.held(&name).map_err(|r| vec![r])?;
     let existing = found.as_ref().map(|f| &f.secret);
     let single = bare && (!annotated || existing.is_none());
     if single && endpoint.is_none() {
@@ -262,18 +268,26 @@ pub fn fresh_link(title: &str, description: Option<&str>, fields: Vec<link::Fiel
     )
 }
 
-/// The vault's Store for `put` and `rm`: synced first, or, when 1Password
-/// cannot be reached, as held, its writes waiting on this host.
-fn to_write(env: &Env) -> Result<Store, Vec<Refusal>> {
-    let mut store = Store::open(env, For::Writing)?;
+/// The vault's Store for `put` and `rm`: staged, as held; or with `now`
+/// writing through, synced first, or, when 1Password cannot be reached,
+/// as held.
+fn to_write(env: &Env, now: bool) -> Result<Store, Vec<Refusal>> {
+    if !now {
+        return Store::open(env, Writes::Staged);
+    }
+    let mut store = Store::open(env, Writes::Now)?;
     store.sync_to_write().map_err(|r| vec![r])?;
     Ok(store)
 }
 
-/// The vault's Store, synced first when `fresh` (`--fresh`, and before `mv`,
-/// which opens it `to` write).
-fn opened(env: &Env, fresh: bool, to: For) -> Result<Store, Vec<Refusal>> {
-    let mut store = Store::open(env, to)?;
+/// The vault's Store, staged, synced first when `fresh` (`--fresh`),
+/// which pushes what is staged.
+fn opened(env: &Env, fresh: bool) -> Result<Store, Vec<Refusal>> {
+    synced(Store::open(env, Writes::Staged)?, fresh)
+}
+
+/// `store`, synced first when `fresh`, failing when that Sync fails.
+fn synced(mut store: Store, fresh: bool) -> Result<Store, Vec<Refusal>> {
     if fresh && let Err(e) = store.sync() {
         return Err(vec![store.refused(e)]);
     }
@@ -288,7 +302,7 @@ fn found(
     fresh: bool,
 ) -> Result<(Name, secret::Secret), Vec<Refusal>> {
     let name = Name::new(service, account).map_err(|r| vec![r])?;
-    let mut store = opened(env, fresh, For::Reading)?;
+    let mut store = opened(env, fresh)?;
     match store.find(&name).map_err(|r| vec![r])? {
         Some(found) => Ok((name, found.secret)),
         None => Err(vec![not_found(&name)]),
@@ -337,7 +351,7 @@ pub fn env(env: &Env, service: &str, account: &str, fresh: bool) -> Answer {
 
 /// Every Secret, never a value.
 pub fn list(env: &Env, fresh: bool) -> Answer {
-    match opened(env, fresh, For::Reading).and_then(|mut store| store.all()) {
+    match opened(env, fresh).and_then(|mut store| store.all()) {
         Ok(all) => Answer::json(&json!({
             "secrets": all.iter().map(|(n, s, pending)| {
                 let mut summary = secret::summary(n, s);
@@ -351,42 +365,49 @@ pub fn list(env: &Env, fresh: bool) -> Answer {
     }
 }
 
-/// Renames the Secret `from` to `to` in place: one Sync, then one edit of
-/// its item, which keeps its id, Fields, kind, description, Meta, history
-/// and what optokens does not own of it.
-pub fn mv(env: &Env, from: (&str, &str), to: (&str, &str)) -> Answer {
-    match moved(env, from, to) {
+/// Renames the Secret `from` to `to` in place: one staged edit of its
+/// item, which keeps its id, Fields, kind, description, Meta, history and
+/// what optokens does not own of it; with `now`, a Sync first and a push.
+pub fn mv(env: &Env, from: (&str, &str), to: (&str, &str), now: bool) -> Answer {
+    match moved(env, from, to, now) {
         Ok(answer) => Answer::json(&answer),
         Err(faults) => Answer::refused(faults),
     }
 }
 
-fn moved(env: &Env, from: (&str, &str), to: (&str, &str)) -> Result<Value, Vec<Refusal>> {
+fn moved(
+    env: &Env,
+    from: (&str, &str),
+    to: (&str, &str),
+    now: bool,
+) -> Result<Value, Vec<Refusal>> {
     let old = Name::new(from.0, from.1).map_err(|r| vec![r])?;
     let new = Name::new(to.0, to.1).map_err(|r| vec![r])?;
-    let mut store = opened(env, true, For::Writing)?;
-    let found = store.find(&old).map_err(|r| vec![r])?;
+    let writes = if now { Writes::Now } else { Writes::Staged };
+    let mut store = synced(Store::open(env, writes)?, now)?;
+    let found = store.held(&old).map_err(|r| vec![r])?;
     let found = found.ok_or_else(|| vec![not_found(&old)])?;
-    if store.find(&new).map_err(|r| vec![r])?.is_some() {
+    if store.held(&new).map_err(|r| vec![r])?.is_some() {
         return Err(vec![Refusal::of(
             &secret::Fault::Exists,
             format!("the vault already has a Secret `{new}`"),
             "`optokens rm` it first, or `mv` onto another name",
         )]);
     }
-    let written = store
+    let pending = store
         .write(Some(&found), &new, &found.secret)
-        .map_err(|r| vec![r])?;
-    Ok(json!({ "secret": new.to_string(), "from": old.to_string(), "pending": written.waits() }))
+        .map_err(|r| vec![r])?
+        .waits();
+    Ok(json!({ "secret": new.to_string(), "from": old.to_string(), "pending": pending }))
 }
 
 /// Removes the Secret; nothing to remove is no fault.
-pub fn rm(env: &Env, service: &str, account: &str) -> Answer {
+pub fn rm(env: &Env, service: &str, account: &str, now: bool) -> Answer {
     let removed = Name::new(service, account)
         .map_err(|r| vec![r])
         .and_then(|name| {
-            let mut store = to_write(env)?;
-            let found = store.find(&name).map_err(|r| vec![r])?;
+            let mut store = to_write(env, now)?;
+            let found = store.held(&name).map_err(|r| vec![r])?;
             let mut pending = false;
             if let Some(found) = &found {
                 pending = store.delete(&found.item.id).map_err(|r| vec![r])?.waits();
@@ -397,6 +418,22 @@ pub fn rm(env: &Env, service: &str, account: &str) -> Answer {
         Ok((name, changed, pending)) => Answer::json(
             &json!({ "secret": name.to_string(), "changed": changed, "pending": pending }),
         ),
+        Err(faults) => Answer::refused(faults),
+    }
+}
+
+/// Sends every change staged on this host in one batch, then pulls.
+pub fn push(env: &Env) -> Answer {
+    match Store::open(env, Writes::Staged).and_then(|mut s| s.push().map_err(|r| vec![r])) {
+        Ok((sent, left)) => Answer::json(&json!({ "pushed": sent, "pending": left })),
+        Err(faults) => Answer::refused(faults),
+    }
+}
+
+/// Each change staged on this host, oldest first.
+pub fn status(env: &Env) -> Answer {
+    match Store::open(env, Writes::Staged).and_then(|mut s| s.staged().map_err(|r| vec![r])) {
+        Ok(staged) => Answer::json(&json!({ "pending": staged })),
         Err(faults) => Answer::refused(faults),
     }
 }

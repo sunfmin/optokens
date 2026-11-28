@@ -52,7 +52,7 @@ title=$service
 name=$service/default
 cleanup() {
     rc=$?
-    "$bin" rm "$service" >/dev/null 2>&1 || op item delete "$title" --vault "$vault" >/dev/null 2>&1 || true
+    "$bin" rm --now "$service" >/dev/null 2>&1 || op item delete "$title" --vault "$vault" >/dev/null 2>&1 || true
     left=$(op item list --vault "$vault" --format json | jq -r '[.[] | select(.title | startswith("e2e-"))] | length')
     printf '\ne2e: items titled e2e-* left in %s: %s\n' "$vault" "$left"
     [ "$rc" = 0 ] && [ "$left" = 0 ] && echo "e2e: ok"
@@ -93,7 +93,7 @@ argv_watch >"$XDG_CONFIG_HOME/argv" &
 watcher=$!
 
 say "openssl rand -hex 16 | optokens put $service --description 'optokens e2e' --meta '{ \"e2e\": 1 }' --set A=1 --field-from-stdin TOKEN"
-out=$(printf '%s' "$value" | "$bin" put "$service" --description "optokens e2e" --meta '{ "e2e": 1 }' --set "A=1" --field-from-stdin TOKEN) ||
+out=$(printf '%s' "$value" | "$bin" put --now "$service" --description "optokens e2e" --meta '{ "e2e": 1 }' --set "A=1" --field-from-stdin TOKEN) ||
     { rc=$?; printf '%s\n' "$out"; fail "put exited $rc"; }
 touch "$XDG_CONFIG_HOME/put.done"
 wait "$watcher"
@@ -152,7 +152,7 @@ printf '%s\n' "$out" | sed "s/^export TOKEN=.*/export TOKEN='***'/"
 echo "ok: eval of env sets A=1 and TOKEN to the value"
 
 say "optokens put $service --set A=2"
-run put "$service" --set "A=2"
+run put --now "$service" --set "A=2"
 echo "$out"
 check "put again changed A" '.changed and .fields == ["A","TOKEN"]' "$out"
 run get "$service" --json
@@ -162,7 +162,7 @@ echo "ok: A is 2, TOKEN kept"
 say "op item get $title --vault $vault --format json  (types)"
 item=$(op item get "$title" --vault "$vault" --format json)
 types "after the upsert"
-run put "$service" --set "A=2"
+run put --now "$service" --set "A=2"
 check "the same put again writes nothing" '.changed == false' "$out"
 
 say "op read op://$vault/$title/fields/A"
@@ -180,7 +180,7 @@ run get "$service" --field A
 [ "$out" = 2 ] || fail "get of the old-titled item is not A=2"
 echo "ok: get finds the old-titled item"
 say "optokens put $service --set A=2  (over the old-titled item)"
-run put "$service" --set "A=2"
+run put --now "$service" --set "A=2"
 echo "$out"
 check "put over the old title rewrites it" '.changed and .fields == ["A","TOKEN"]' "$out"
 item=$(op item get "$id" --vault "$vault" --format json)
@@ -202,7 +202,7 @@ check "the description is in the section" '[.fields[] | select(.section.label ==
 run list
 check "list reads the section's description" '[.secrets[] | select(.service == "'"$service"'") | .description] == ["optokens e2e"]' "$out"
 say "optokens put $service --set A=2  (over it: the same Secret)"
-run put "$service" --set "A=2"
+run put --now "$service" --set "A=2"
 echo "$out"
 check "put rewrites the earlier layout" '.changed' "$out"
 item=$(op item get "$id" --vault "$vault" --format json)
@@ -216,7 +216,7 @@ pipe1=$(openssl rand -hex 16) pipe2=$(openssl rand -base64 24)
 say "optokens put $service --field-from-pipe PIPE1=<(printf ...) --field-from-pipe PIPE2=<(printf ...)  (bash; values from openssl rand)"
 # The values reach bash in its environment, which it drops before it runs
 # optokens: only its builtin printf holds them, and argv only /dev/fd/N.
-out=$(P1=$pipe1 P2=$pipe2 /bin/bash -c 'a=$P1 b=$P2; unset P1 P2; "$0" put "$1" --field-from-pipe PIPE1=<(printf "%s\n" "$a") --field-from-pipe PIPE2=<(printf %s "$b")' "$bin" "$service") ||
+out=$(P1=$pipe1 P2=$pipe2 /bin/bash -c 'a=$P1 b=$P2; unset P1 P2; "$0" put --now "$1" --field-from-pipe PIPE1=<(printf "%s\n" "$a") --field-from-pipe PIPE2=<(printf %s "$b")' "$bin" "$service") ||
     { rc=$?; printf '%s\n' "$out"; fail "the two-pipe put exited $rc"; }
 echo "$out"
 check "the two-pipe put added both" '.changed and .fields == ["A","TOKEN","PIPE1","PIPE2"]' "$out"
@@ -240,9 +240,9 @@ printf '%s' "$item" | jq -c '{tags, sections: [.sections[]? | .label]}'
 run list
 check "a section optokens does not know is read past" '[.secrets[] | select(.service == "'"$service"'") | .fields] == [["A","TOKEN","PIPE1","PIPE2"]]' "$out"
 say "optokens put $service --set A=3, then --set NEW=4"
-run put "$service" --set "A=3"
+run put --now "$service" --set "A=3"
 check "put changed A, the order kept" '.changed and .fields == ["A","TOKEN","PIPE1","PIPE2"]' "$out"
-run put "$service" --set "NEW=4"
+run put --now "$service" --set "NEW=4"
 check "a new Field goes last" '.changed and .fields == ["A","TOKEN","PIPE1","PIPE2","NEW"]' "$out"
 item=$(op item get "$id" --vault "$vault" --format json)
 printf '%s' "$item" | jq -c '{tags, sections: [.sections[]? | .label], mytokens: [.fields[] | select(.section.label == "mytokens") | {(.label): .value}]}'
@@ -254,7 +254,7 @@ run env "$service"
 echo "ok: env prints A TOKEN PIPE1 PIPE2 NEW in order"
 
 say "optokens put $service --description ''"
-run put "$service" --description ""
+run put --now "$service" --description ""
 check "an empty description clears it" '.changed' "$out"
 item=$(op item get "$id" --vault "$vault" --format json)
 echo "notes: $(notes "$item")"
@@ -263,10 +263,10 @@ run list
 check "list shows no description" '[.secrets[] | select(.service == "'"$service"'") | .description] == [null]' "$out"
 
 say "optokens rm $service"
-run rm "$service"
+run rm --now "$service"
 echo "$out"
 check "rm removed it" '.secret == "'"$name"'" and .changed' "$out"
-run rm "$service"
+run rm --now "$service"
 check "rm again is no fault" '.changed == false' "$out"
 if "$bin" get "$service" --json >/dev/null 2>"$XDG_CONFIG_HOME/get.err"; then fail "get still finds it"; fi
 check "get then refuses not_found" '.error[0].kind == "not_found"' "$(cat "$XDG_CONFIG_HOME/get.err")"

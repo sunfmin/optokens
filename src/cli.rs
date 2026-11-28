@@ -29,7 +29,9 @@ pub(crate) const EXIT_ERROR: i32 = 2;
 /// ## Rules to know first
 ///
 /// - A secret's value is never in any process's command line (`ps` does not show it) and never in a file in plaintext: optokens runs no program to reach 1Password (it runs 1Password's own SDK Core inside itself), and its Copy of the vault is sealed.
-/// - `get`, `env` and `list` answer from the Copy, the sealed copy of the vault's Secrets in the config directory, with no network however long ago it was synced. optokens reaches 1Password only with `--fresh`, at a write (`put`, `rm`, `mv`), at a `get` or `env` of a Secret the Copy lacks, or when there is no Copy yet. Give `--fresh` right after a Secret was changed on another host: until then a read answers as the Copy holds it. A `get` or `env` of a Secret the Copy lacks syncs once, then answers it or refuses `not_found`; when that Sync fails (no network, 1Password down), it answers from the Copy, with one line on stderr, `warning: 1Password could not be synced (<why>); answering from the local copy synced <age> ago`. With no Copy yet, a read whose Sync fails refuses (`vault_failed`). `--fresh` and `mv` always sync first, and fail when the Sync fails. `put` and `rm` sync first too; when that Sync cannot reach 1Password (no network, the rate limit, 1Password down), they go on from the Copy as held, their write waits as below, and stderr also says `1Password could not be reached (<why>); {const:WAITS}`; any other failed Sync refuses. After that Sync, a write 1Password cannot take now (no network, the rate limit, 1Password down) waits, sealed in `{const:PENDING_FILE}` beside the Copy: the command answers `"pending": true`, with one `warning:` line on stderr naming the write, why it waits and the file; every read warns of it with one `warning:` line on stderr naming how many wait, their file, and `{const:PUSH}`, which pushes them now; and the next Sync that reaches 1Password (`--fresh`, the next write, a Secret the Copy lacks) pushes it, each change replayed on the item as it then is: a Field another host changed meanwhile is kept, and one both changed takes this host's value, named in a `warning:` line. Another host sees the write only after that push. Any other refusal of a write is its error, and nothing waits.
+/// - `put`, `mv` and `rm` stage their change on this host and answer at once with `"pending": true`, reaching no 1Password: the change is sealed in `{const:PENDING_FILE}` beside the Copy, `get`, `env` and `list` on this host show it at once, `list` marks its Secret `"pending": true`, and every read says on stderr, in one `warning:` line, how many changes wait, their file, and `{const:PUSH}`, which sends them. `optokens status` lists them. They reach 1Password, and other hosts, only at a push: `{const:PUSH}`, a write's `--now`, or a `--fresh`, each sending every staged change in one process, one of the account's daily requests, each Secret's changes folded into one write. Until then they live only on this host: a host lost before a push loses them, and the file is never rebuilt. Stage a run of changes, then push once.
+/// - `get`, `env` and `list` answer from the Copy, the sealed copy of the vault's Secrets in the config directory, with no network however long ago it was synced. optokens reaches 1Password only at a push, at a `get` or `env` of a Secret the Copy lacks, or when there is no Copy yet. Give `--fresh` right after a Secret was changed on another host: until then a read answers as the Copy holds it. A `get` or `env` of a Secret the Copy lacks syncs once (pushing what is staged), then answers it or refuses `not_found`; when that Sync fails (no network, 1Password down), it answers from the Copy, with one line on stderr, `warning: 1Password could not be synced (<why>); answering from the local copy synced <age> ago`. With no Copy yet, a read whose Sync fails refuses (`vault_failed`), and a write syncs first. A push makes each change on the item as 1Password holds it then: a Field another host changed meanwhile is kept, and one both changed takes this host's value, named in a `warning:` line. A change 1Password cannot take now (no network, the rate limit, 1Password down) stays staged for the next push; one it refuses for good is dropped, named in a `warning:` line.
+/// - A staged write sees only what the Copy holds: a `put` of a Secret another host made since this host's last Sync makes a second item of it at the push. Run `optokens list --fresh` first, or give the write `--now`, which syncs first. `--now` and `--fresh` fail when their Sync fails, except a `put --now` or `rm --now` whose Sync cannot reach 1Password (no network, the rate limit, 1Password down): it goes on from the Copy as held, its change stays staged, and stderr says `1Password could not be reached (<why>); {const:WAITS}`.
 /// - A command that takes a value a person knows waits for it to be submitted on a one-time link, which it prints first: it does not answer until the person submits it, or the link expires. Every other command asks nothing.
 ///
 /// ## Output
@@ -162,11 +164,11 @@ enum Cmd {
     ///
     /// ## When to run it
     ///
-    /// When a command needs a credential or a Profile that `optokens list` does not show, or one of its Fields must change. Run it once per Secret: two `put`s of one Secret at once may lose one's change.
+    /// When a command needs a credential or a Profile that `optokens list` does not show, or one of its Fields must change. Make a run of changes, then `optokens push` once. Never two `put`s of one Secret at once: one's change may be lost.
     ///
     /// ## What it reads and writes
     ///
-    /// It syncs the Copy with the vault first, so it never writes over a stale item, reads the Secret from it, merges into it what this `put` names, and writes it back as one item, only when that changes it: one write, whose answer the Copy keeps. When that Sync cannot reach 1Password, it reads the Secret from the Copy as held instead, and the write waits on this host: see `pending` below. A Field not named is kept. `--set "NAME=value"` sets a Field that is not secret, split on the first `=`, stored as plain text; repeat it. `--field-from-stdin <Label>` sets one Field to all of stdin, one trailing newline dropped, stored concealed: for a secret a command makes and pipes in, such as `openssl rand -base64 32 | optokens put deploy-db --set "Username=svc" --field-from-stdin Password`. `--field-from-pipe <Label>=<(command)` sets a Field to all the command prints, one trailing newline dropped, stored concealed; repeat it to store several generated secrets in one `put`, such as `optokens put deploy-db --set "Username=svc" --field-from-pipe Password=<(openssl rand -base64 32) --field-from-pipe SigningKey=<(openssl rand -hex 32)`. The shell (bash, zsh) runs each command and puts only its pipe's path, `/dev/fd/N`, on the command line; `put` reads each pipe to its end and refuses any path that is not a pipe, a file among them. On Windows, PowerShell has no `<(command)`: the path must be a named pipe, `\\.\pipe\<name>`, or use one `put --field-from-stdin` per value. `--description` replaces the description, the item's notes (`--description ""` clears it); alone, for a stored Secret, it changes nothing else. `--meta '<json>'` replaces the Secret's Meta, structured data about it for a program to read (a Cloudflare `account_id`), one JSON object; a `put` without it keeps the stored one, and alone, for a stored Secret, it changes nothing else. Anything but one JSON object is refused (`bad_meta`). A new Secret is `static` unless `--kind profile`. A Profile's labels are environment variables' names, for `env`. How a Secret is laid out in the vault: [Secrets in the vault](help:secrets).
+    /// It reads the Secret from the Copy, its staged changes made, merges into it what this `put` names, and stages it as one item, only when that changes it, with no network: a push sends it (`optokens --help`). With `--now` it syncs the Copy first, so it never writes over a stale item, and pushes before it answers, every change staged before it among them: for a change another host needs right away. When that Sync cannot reach 1Password, it reads the Secret from the Copy as held instead, and the change stays staged. A Field not named is kept. `--set "NAME=value"` sets a Field that is not secret, split on the first `=`, stored as plain text; repeat it. `--field-from-stdin <Label>` sets one Field to all of stdin, one trailing newline dropped, stored concealed: for a secret a command makes and pipes in, such as `openssl rand -base64 32 | optokens put deploy-db --set "Username=svc" --field-from-stdin Password`. `--field-from-pipe <Label>=<(command)` sets a Field to all the command prints, one trailing newline dropped, stored concealed; repeat it to store several generated secrets in one `put`, such as `optokens put deploy-db --set "Username=svc" --field-from-pipe Password=<(openssl rand -base64 32) --field-from-pipe SigningKey=<(openssl rand -hex 32)`. The shell (bash, zsh) runs each command and puts only its pipe's path, `/dev/fd/N`, on the command line; `put` reads each pipe to its end and refuses any path that is not a pipe, a file among them. On Windows, PowerShell has no `<(command)`: the path must be a named pipe, `\\.\pipe\<name>`, or use one `put --field-from-stdin` per value. `--description` replaces the description, the item's notes (`--description ""` clears it); alone, for a stored Secret, it changes nothing else. `--meta '<json>'` replaces the Secret's Meta, structured data about it for a program to read (a Cloudflare `account_id`), one JSON object; a `put` without it keeps the stored one, and alone, for a stored Secret, it changes nothing else. Anything but one JSON object is refused (`bad_meta`). A new Secret is `static` unless `--kind profile`. A Profile's labels are environment variables' names, for `env`. How a Secret is laid out in the vault: [Secrets in the vault](help:secrets).
     ///
     /// ## The one-time link
     ///
@@ -178,18 +180,18 @@ enum Cmd {
     /// - **What it prints**: on stderr, while it waits, `optokens: open this link to enter the secret for <service> / <account> (it works once, within {const:LINK_MINUTES} minutes):` and the URL on the next line. Hand that URL to the person: delivering it is not optokens' job. Stdout keeps only the final JSON answer.
     /// - **The page**: the Secret, its description, a password input per Field asked (a plain text input for each `--show` label), and each stored Field this `put` keeps as "already set", never its value. A second submission, or one after expiry, answers 410.
     ///
-    /// A value submitted goes from the page straight into the item 1Password stores, never to optokens' stdout or stderr, a log, a command line or a file. After the submission, or at expiry, `put` stops serving and answers.
+    /// A value submitted goes from the page straight into the item, staged sealed on this host until a push sends it to 1Password, never to optokens' stdout or stderr, a log, a command line or a file in plaintext. After the submission, or at expiry, `put` stops serving and answers.
     ///
     /// ## What it answers
     ///
     /// - `secret`: `<service>/<account>`.
     /// - `changed`: whether it wrote; `false` when the Secret already held all it was given.
-    /// - `pending`: `true` when 1Password could not take the write now, or its Sync could not reach 1Password, so it waits on this host for the next Sync (see `optokens --help`); a value entered on the one-time link waits the same way; `false` when 1Password took it, or nothing was written.
+    /// - `pending`: `true` when the change is staged on this host for the next push: always, without `--now`, a value entered on the one-time link among them; with `--now`, when 1Password could not take it now. `false` when `--now` pushed it, or nothing was written.
     /// - `kind`: `static` or `profile`.
     /// - `fields`: the Secret's labels now, `null` for a single value.
     ///
     /// ```json
-    /// { "secret": "deploy-db/default", "changed": true, "pending": false, "kind": "static", "fields": ["Username", "Password"] }
+    /// { "secret": "deploy-db/default", "changed": true, "pending": true, "kind": "static", "fields": ["Username", "Password"] }
     /// ```
     ///
     /// ## What it may refuse
@@ -213,7 +215,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads the Secret from the Copy, with no network however old the Copy is, and writes nothing but the Copy. With `--fresh` it syncs first: give `--fresh` right after the Secret was changed on another host; a Sync that fails then fails it (`vault_failed`). A Secret the Copy lacks syncs once, then is answered or refused `not_found`; that Sync failing answers from the Copy, with a `warning:` line on stderr.
+    /// It reads the Secret from the Copy, with no network however old the Copy is, and writes nothing but the Copy. With `--fresh` it syncs first, pushing what is staged: give `--fresh` right after the Secret was changed on another host; a Sync that fails then fails it (`vault_failed`). A Secret the Copy lacks syncs once, then is answered or refused `not_found`; that Sync failing answers from the Copy, with a `warning:` line on stderr.
     ///
     /// ## What it answers
     ///
@@ -261,7 +263,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads the Secret from the Copy, with no network however old the Copy is, and writes nothing but the Copy. With `--fresh` it syncs first: give `--fresh` right after the Secret was changed on another host; a Sync that fails then fails it (`vault_failed`). A Secret the Copy lacks syncs once, then is answered or refused `not_found`; that Sync failing answers from the Copy, with a `warning:` line on stderr.
+    /// It reads the Secret from the Copy, with no network however old the Copy is, and writes nothing but the Copy. With `--fresh` it syncs first, pushing what is staged: give `--fresh` right after the Secret was changed on another host; a Sync that fails then fails it (`vault_failed`). A Secret the Copy lacks syncs once, then is answered or refused `not_found`; that Sync failing answers from the Copy, with a `warning:` line on stderr.
     ///
     /// ## What it answers
     ///
@@ -295,11 +297,11 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads every item tagged `optokens` from the Copy, with no network however old the Copy is, synced first only with `--fresh` or when there is no Copy yet, and writes nothing but the Copy. With `--fresh`, a Sync that fails fails it (`vault_failed`); `list --fresh` also pushes the writes that wait on this host. Items without the tag are not optokens' and not listed.
+    /// It reads every item tagged `optokens` from the Copy, with no network however old the Copy is, synced first only with `--fresh` or when there is no Copy yet, and writes nothing but the Copy. With `--fresh`, a Sync that fails fails it (`vault_failed`); `list --fresh` also pushes the changes staged on this host, as `optokens push` does. Items without the tag are not optokens' and not listed.
     ///
     /// ## What it answers
     ///
-    /// `secrets`, by service, then account, each with `service`, `account`, `kind`, `description` (or `null`), `meta`, the Meta (or `null`), and `fields`, its labels (`null` for a single value); and `pending: true` for a Secret whose `put` waits on this host for 1Password (a removal that waits hides its Secret):
+    /// `secrets`, by service, then account, each with `service`, `account`, `kind`, `description` (or `null`), `meta`, the Meta (or `null`), and `fields`, its labels (`null` for a single value); and `pending: true` for a Secret with changes staged on this host that no push has sent (a staged `rm` hides its Secret; `optokens status` lists each change):
     ///
     /// ```json
     /// { "secrets": [ { "service": "glm", "account": "default", "kind": "profile", "description": "Claude Code to GLM", "meta": null, "fields": ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] } ] }
@@ -310,7 +312,7 @@ enum Cmd {
     /// The service account's faults ([the token and the vault](help:account)), `vault_failed`, and `not_optokens` for each tagged item that is not optokens' layout, in [Secrets in the vault](help:secrets).
     #[command(next_help_heading = "Run by the agent", verbatim_doc_comment)]
     List {
-        /// Syncs with the vault first: right after a Secret was changed, added or removed on another host.
+        /// Pushes what is staged and syncs with the vault first: right after a Secret was changed, added or removed on another host.
         #[arg(long, verbatim_doc_comment)]
         fresh: bool,
     },
@@ -322,14 +324,14 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It syncs the Copy with the vault once, finds the Secret's item, sees that the new name holds nothing, and edits that one item: its title and its section `optokens` name the new Secret. Its Fields, their types, its kind, description, Meta, and what optokens does not own of it are kept: one write, whose answer the Copy keeps. `--to-account` is the new account, `--account`'s when not given: `optokens mv glm glm --to-account work` moves only the account.
+    /// It finds the Secret's item in the Copy, sees that the new name holds nothing there, and stages one edit of that one item: its title and its section `optokens` name the new Secret. Its Fields, their types, its kind, description, Meta, and what optokens does not own of it are kept. A push sends it (`optokens --help`). With `--now` it syncs the Copy first, failing when that Sync fails, and pushes before it answers. `--to-account` is the new account, `--account`'s when not given: `optokens mv glm glm --to-account work` moves only the account.
     ///
     /// ## What it answers
     ///
-    /// `secret`, the new `<service>/<account>`; `from`, the old; and `pending`, `true` when 1Password could not take the edit now, so it waits for the next Sync (see `optokens --help`):
+    /// `secret`, the new `<service>/<account>`; `from`, the old; and `pending`, `true` when the edit is staged for the next push (always, without `--now`), `false` when `--now` pushed it:
     ///
     /// ```json
-    /// { "secret": "claude/ultra", "from": "agent-account/default", "pending": false }
+    /// { "secret": "claude/ultra", "from": "agent-account/default", "pending": true }
     /// ```
     ///
     /// ## What it may refuse
@@ -349,6 +351,9 @@ enum Cmd {
         /// Its new account; `--account`'s when not given.
         #[arg(long, verbatim_doc_comment)]
         to_account: Option<String>,
+        /// Pushes to 1Password before it answers: this change, and every one staged before it.
+        #[arg(long, verbatim_doc_comment)]
+        now: bool,
     },
     /// Removes a Secret: its item in the vault, every Field with it.
     ///
@@ -358,14 +363,14 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It syncs the Copy with the vault, finds the Secret's item and deletes it for good (not archived): one delete. When the Sync cannot reach 1Password, it finds the Secret in the Copy as held and the delete waits on this host (`optokens --help`).
+    /// It finds the Secret's item in the Copy and stages its delete, for good (not archived): a push sends it (`optokens --help`), and until then reads on this host no longer show the Secret. With `--now` it syncs the Copy first and pushes before it answers; when that Sync cannot reach 1Password, it finds the Secret in the Copy as held and the delete stays staged.
     ///
     /// ## What it answers
     ///
-    /// `secret`, `<service>/<account>`; `changed`, `false` when there was no such Secret, which is no fault, so it can run again; and `pending`, `true` when 1Password could not take the delete now, so it waits for the next Sync (see `optokens --help`).
+    /// `secret`, `<service>/<account>`; `changed`, `false` when there was no such Secret, which is no fault, so it can run again; and `pending`, `true` when the delete is staged for the next push (always, without `--now`), `false` when `--now` pushed it, or there was nothing to delete.
     ///
     /// ```json
-    /// { "secret": "cloudflare/default", "changed": true, "pending": false }
+    /// { "secret": "cloudflare/default", "changed": true, "pending": true }
     /// ```
     ///
     /// ## What it may refuse
@@ -379,7 +384,56 @@ enum Cmd {
         /// The Secret's account.
         #[arg(long, default_value = secret::DEFAULT_ACCOUNT, verbatim_doc_comment)]
         account: String,
+        /// Pushes to 1Password before it answers: this change, and every one staged before it.
+        #[arg(long, verbatim_doc_comment)]
+        now: bool,
     },
+    /// Sends every change staged on this host to 1Password in one batch, then syncs the Copy.
+    ///
+    /// ## When to run it
+    ///
+    /// After a run of `put`, `mv` and `rm`, once the changes are made: before another host needs them, and before this host may be lost. Until then they are only on this host.
+    ///
+    /// ## What it reads and writes
+    ///
+    /// One process, one sign-in, one of the account's daily requests, however many changes are staged: one list of the vault, one batch get of the items that changed there and of those it edits, the new Secrets in one batch create, one write per changed Secret that was there, the removals in one batch delete, then the Sync of the Copy from the same list. Each Secret's changes are folded into one write first: two `put`s of one Secret are one write, a `put` of a new Secret and its `rm` are none. Each change is made on the item as 1Password holds it then: a Field another host changed meanwhile is kept, and one both changed takes this host's value, named in a `warning:` line on stderr. A change 1Password refuses for good is dropped, with a `warning:` line naming it. With nothing staged, it reaches no 1Password: `list --fresh` syncs.
+    ///
+    /// ## What it answers
+    ///
+    /// `pushed`, how many staged changes it sent, and `pending`, how many still wait on this host (1Password could not take them now: run it again later):
+    ///
+    /// ```json
+    /// { "pushed": 7, "pending": 0 }
+    /// ```
+    ///
+    /// ## What it may refuse
+    ///
+    /// The service account's faults ([the token and the vault](help:account)), and `vault_failed` when 1Password cannot be reached or refuses (the rate limit among them, with its fix): what is staged stays staged.
+    #[command(next_help_heading = "Run by the agent", verbatim_doc_comment)]
+    Push,
+    /// Lists the changes staged on this host that no push has sent yet, never a value.
+    ///
+    /// ## When to run it
+    ///
+    /// When a read warns that changes wait, to see which, before `optokens push`.
+    ///
+    /// ## What it reads and writes
+    ///
+    /// The staged changes, `{const:PENDING_FILE}` beside the Copy, with no network; it writes nothing.
+    ///
+    /// ## What it answers
+    ///
+    /// `pending`, oldest first, each with `secret` (`<service>/<account>`, `null` for a Secret a staged `rm` removed), `item` (its item's title), `change` (`create`, `edit` or `delete`) and `at` (when it was staged, RFC 3339 in UTC). Empty when nothing waits.
+    ///
+    /// ```json
+    /// { "pending": [ { "secret": "db/default", "item": "db", "change": "edit", "at": "2026-11-28T09:30:05Z" } ] }
+    /// ```
+    ///
+    /// ## What it may refuse
+    ///
+    /// The service account's faults ([the token and the vault](help:account)), and `vault_failed` when the staged changes do not open (another token sealed them).
+    #[command(next_help_heading = "Run by the agent", verbatim_doc_comment)]
+    Status,
 }
 
 /// Where optokens finds the 1Password service account's token, and the vault it keeps Secrets in: every command that reaches 1Password reads them the same way.
@@ -400,7 +454,7 @@ enum Cmd {
 /// - `{const:TOKEN_ENV}` wins whenever it is set: a token file is then not read, nor its mode checked.
 /// - The token is never on a command line nor in another process: optokens hands it to the 1Password Core it runs inside itself.
 /// - The Copy, `{const:COPY_FILE}` beside the token file, is sealed with a key derived from the token: another token's Copy does not open, and is rebuilt by a Sync.
-/// - The writes waiting for 1Password, `{const:PENDING_FILE}` beside the Copy, are sealed under the token too, but are never rebuilt: do not delete the file, or what waits in it is lost. The Sync that pushes the last of them removes the file. While it holds writes, another token reads the Copy without them, with a `warning:` line on stderr naming the file, and every `put`, `mv` or `rm` it runs is refused (`vault_failed`, naming the file) until the token that wrote them is back and a Sync has pushed them; when that token is gone for good, move the file aside, and what waits in it is lost.
+/// - The changes staged on this host, `{const:PENDING_FILE}` beside the Copy, are sealed under the token too, but are never rebuilt: do not delete the file, or what waits in it is lost. The push that sends the last of them removes the file. While it holds changes, another token reads the Copy without them, with a `warning:` line on stderr naming the file, and every `put`, `mv` or `rm` it runs is refused (`vault_failed`, naming the file) until the token that staged them is back and a push has sent them; when that token is gone for good, move the file aside, and what waits in it is lost.
 #[derive(Topic)]
 #[topic(name = "account")]
 struct AccountTopic;
@@ -583,11 +637,18 @@ pub(crate) fn run(args: impl IntoIterator<Item = std::ffi::OsString>) -> Answer 
             new_service,
             account,
             to_account,
+            now,
         } => {
             let to_account = to_account.as_deref().unwrap_or(&account);
-            commands::mv(&env, (&service, &account), (&new_service, to_account))
+            commands::mv(&env, (&service, &account), (&new_service, to_account), now)
         }
-        Cmd::Rm { service, account } => commands::rm(&env, &service, &account),
+        Cmd::Rm {
+            service,
+            account,
+            now,
+        } => commands::rm(&env, &service, &account, now),
+        Cmd::Push => commands::push(&env),
+        Cmd::Status => commands::status(&env),
     }
 }
 

@@ -10,7 +10,7 @@ use crate::link::{self, Input};
 use crate::refusal::Refusal;
 use crate::secret::{DEFAULT_ACCOUNT, Kind, Name, Secret, Values};
 use crate::serve::Endpoint;
-use crate::store::{For, Store, Written};
+use crate::store::{Store, Writes, Written};
 use agent_help::Table;
 use serde_json::{Value, json};
 
@@ -62,7 +62,7 @@ fn run(env: &Env, args: InitArgs) -> Result<Value, Vec<Refusal>> {
     };
     let source = token.source.clone();
     let dir = account::config_dir(env).map_err(|r| vec![r])?;
-    checks(&mut Store::new(&token, vault.name.clone(), &dir, For::Writing)).map_err(|mut refusal| {
+    checks(&mut Store::new(&token, vault.name.clone(), &dir, Writes::Now)).map_err(|mut refusal| {
         if !args.check {
             refusal.fault = format!(
                 "{}; the token file `{}` and the vault file are written and kept, so once it is fixed `optokens init --check` checks again with no new link",

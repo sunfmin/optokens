@@ -54,6 +54,7 @@ fn fields_over_plain_http_store_once_and_a_second_post_is_gone() {
         &host,
         &[
             "put",
+            "--now",
             "db",
             "--fields",
             "Password, User",
@@ -181,9 +182,12 @@ fn a_bare_put_over_https_stores_one_value() {
     assert_eq!(put.code, 0, "{}", put.stderr);
     assert_eq!(
         put.json(),
-        json!({ "secret": "cloudflare/default", "changed": true, "pending": false, "kind": "static", "fields": null })
+        json!({ "secret": "cloudflare/default", "changed": true, "pending": true, "kind": "static", "fields": null })
     );
+    // Staged, as every write: this host reads it at once, the vault at the push.
     assert_eq!(get(&host, &["get", "cloudflare"]).stdout, "cf+token");
+    assert_eq!(host.items(), json!([]));
+    assert_eq!(get(&host, &["push"]).json()["pushed"], 1);
     assert_eq!(
         host.field_types("cloudflare"),
         json!({ "value": "Concealed" })
@@ -207,6 +211,7 @@ fn a_field_not_named_is_kept_and_shown_only_as_already_set() {
     let first = host.run(
         &[
             "put",
+            "--now",
             "aws",
             "--set",
             "Access Key ID=AKIA-kept",
@@ -217,7 +222,7 @@ fn a_field_not_named_is_kept_and_shown_only_as_already_set() {
         Some(b"old-secret"),
     );
     assert_eq!(first.code, 0, "{}", first.stdout);
-    let waiting = start(&host, &["put", "aws", "--fields", "Secret"], &[]);
+    let waiting = start(&host, &["put", "--now", "aws", "--fields", "Secret"], &[]);
     let (_, page) = waiting.request("GET", "");
     assert!(page.contains("<b>Access Key ID</b>: already set"), "{page}");
     assert!(
