@@ -155,6 +155,24 @@ impl Host {
         let _ = std::fs::remove_file(self.config().join("copy"));
     }
 
+    /// The Copy made as if its last Sync was `secs` ago, resealed as
+    /// opcore seals it (the token `ops_test_token`, the vault `optokens`).
+    pub fn age_copy(&self, secs: u64) {
+        let path = self.config().join("copy");
+        let sealer = opcore::Sealer::new(
+            "ops_test_token",
+            "optokens's copy of 1Password vault optokens",
+        );
+        let plain = sealer.open(&std::fs::read(&path).unwrap()).unwrap();
+        let mut held: Value = serde_json::from_slice(&plain).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        held["synced_at"] = (now - secs).into();
+        std::fs::write(&path, sealer.seal(&serde_json::to_vec(&held).unwrap())).unwrap();
+    }
+
     pub fn config(&self) -> PathBuf {
         self.dir.path().join("home/.config/optokens")
     }
@@ -255,6 +273,13 @@ impl Host {
         let fields = item["fields"].as_array_mut().unwrap();
         let field = fields.iter_mut().find(|f| f["title"] == label).unwrap();
         field["value"] = json!(value);
+        self.set_state(&state);
+    }
+
+    /// `item` made by another host: in the vault, not in this host's Copy.
+    pub fn add(&self, item: Value) {
+        let mut state = self.state();
+        state["core"]["items"].as_array_mut().unwrap().push(item);
         self.set_state(&state);
     }
 }

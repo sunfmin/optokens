@@ -64,6 +64,12 @@
     "sentence": "A wrong path answers 404 and a method other than GET or POST 405; a POST with an empty field answers the form again, 400, with \"Every field needs a value.\"",
     "source": "docs/adr/0008-the-one-time-links-rules.md:17"
   },
+  "8dfa225fdaac": {
+    "mark": "not",
+    "sentence": "With a Life, every read past it reached 1Password and spent one of the account's daily requests, for no question the person asked; the account's 1000 ran out on 2026-11-27 (decision record 17).",
+    "source": "docs/adr/0019-the-copy-syncs-on-demand.md:5",
+    "why": "ADR 0019's context: why a Life cost requests, not what optokens does"
+  },
   "9aa804054b37": {
     "mark": "not",
     "sentence": "A Secret's values go in and out only over `op`'s stdin and stdout (JSON item templates), and the service account's token goes only in the child's environment.",
@@ -105,6 +111,11 @@
     "mark": "promise",
     "sentence": "`env` prints `export NAME='value'` lines on every OS, for sh, bash and zsh, Git Bash and WSL on Windows included, as mytokens prints them (ADR 0001). There is no PowerShell form yet: `env --shell powershell` is added when someone needs it.",
     "source": "docs/adr/0005-env-prints-posix-exports.md:3"
+  },
+  "cb180abe7b48": {
+    "mark": "promise",
+    "sentence": "optokens reaches 1Password only with `--fresh`, at a write (`put`, `rm`, `mv`), at a Secret the Copy lacks, or with no Copy yet: opcore's Copy on demand (`Syncs::OnDemand`, opcore's decision record 5).",
+    "source": "docs/adr/0019-the-copy-syncs-on-demand.md:10"
   },
   "d15235a9d5b8": {
     "mark": "promise",

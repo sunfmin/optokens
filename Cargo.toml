@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 agent-help = { git = "https://github.com/sunfmin/agent-cli", rev = "f506df826a97b2fd834e1d65b9057001a6a6e796" }
-opcore = { git = "https://github.com/sunfmin/opcore", rev = "bb02f5c355592b6a3f0a80512baf18b2ba457787" }
+opcore = { git = "https://github.com/sunfmin/opcore", rev = "e80060b45d89b0bd79550cdc51b510e756b108df" }
 form_urlencoded = "1.2.2"
 getrandom = "0.4.3"
 clap = { version = "4.6.8", features = ["derive"] }

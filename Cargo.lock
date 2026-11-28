@@ -736,7 +736,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 [[package]]
 name = "opcore"
 version = "0.1.0"
-source = "git+https://github.com/sunfmin/opcore?rev=bb02f5c355592b6a3f0a80512baf18b2ba457787#bb02f5c355592b6a3f0a80512baf18b2ba457787"
+source = "git+https://github.com/sunfmin/opcore?rev=e80060b45d89b0bd79550cdc51b510e756b108df#e80060b45d89b0bd79550cdc51b510e756b108df"
 dependencies = [
  "chacha20poly1305 0.11.0",
  "factum",

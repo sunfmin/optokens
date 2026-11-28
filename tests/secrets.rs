@@ -9,8 +9,8 @@ use common::{FIRST_SYNC, Host, Ran, SYNC, first_synced, meta, stored, synced, va
 use serde_json::{Value, json};
 
 const TOKEN: (&str, &str) = ("OP_SERVICE_ACCOUNT_TOKEN", "ops_test_token");
-/// A Copy past its Life at once.
-const STALE: (&str, &str) = ("OPTOKENS_TEST_COPY_LIFE_MS", "0");
+/// A year, in seconds: how old a Copy long synced is made.
+const YEAR: u64 = 365 * 86400;
 
 fn host() -> Host {
     Host::new(&[], json!({ "core": {} }))
@@ -123,7 +123,7 @@ fn put_list_get_env_rm_a_profile() {
     assert_eq!(calls(&host), synced(&["ItemsGetAll", "ItemsPut"]));
     sealed(&host, &known);
 
-    // Within the Copy's Life, list, get and env call nothing.
+    // From the Copy, list, get and env call nothing.
     let list = run(&host, &["list"]);
     assert_eq!(list.code, 0);
     assert_eq!(
@@ -187,10 +187,10 @@ fn put_list_get_env_rm_a_profile() {
     sealed(&host, &known);
 }
 
-/// Within its Life the Copy answers alone; past it, a Sync lists once and
-/// gets only what changed; `--fresh` syncs within it.
+/// The Copy answers alone however old it is; `--fresh` syncs, listing once
+/// and getting only what changed; a Secret the Copy lacks syncs once.
 #[test]
-fn the_copy_answers_within_its_life_and_a_sync_gets_only_what_changed() {
+fn the_copy_answers_however_old_and_a_sync_gets_only_what_changed() {
     let item = |id: &str, service: &str, v: &str| {
         stored(
             id,
@@ -224,15 +224,19 @@ fn the_copy_answers_within_its_life_and_a_sync_gets_only_what_changed() {
     }
     assert_eq!(calls(&host), Vec::<String>::new(), "a warm Copy: no call");
 
-    // Past its Life, nothing changed: one list, no get.
-    let stale = host.run(&["get", "b"], &[TOKEN, STALE], None);
-    assert_eq!(stale.stdout, "B-1");
-    assert_eq!(calls(&host), SYNC);
+    // Synced a year ago: still no call.
+    host.age_copy(YEAR);
+    for args in [&["list"][..], &["get", "a"], &["env", "a"]] {
+        assert_eq!(run(&host, args).code, 2 * (args[0] == "env") as i32);
+    }
+    assert_eq!(calls(&host), Vec::<String>::new(), "an old Copy: no call");
 
-    // One item changed on another host: one list, one get of it alone.
+    // One item changed on another host: read as held until `--fresh`, whose
+    // Sync lists once and gets it alone.
     host.change("a", "value", "A-2");
-    assert_eq!(run(&host, &["get", "a"]).stdout, "A-1", "within its Life");
-    let changed = host.run(&["get", "a"], &[TOKEN, STALE], None);
+    assert_eq!(run(&host, &["get", "a"]).stdout, "A-1", "as held");
+    assert_eq!(calls(&host), Vec::<String>::new());
+    let changed = run(&host, &["get", "a", "--fresh"]);
     assert_eq!(changed.stdout, "A-2");
     let got: Vec<Value> = host
         .calls()
@@ -248,7 +252,20 @@ fn the_copy_answers_within_its_life_and_a_sync_gets_only_what_changed() {
         "the one item changed, alone"
     );
 
-    // `--fresh` syncs within the Life.
+    // A Secret made on another host since: one Sync, then its value.
+    host.add(item("c1", "c", "C-1"));
+    assert_eq!(run(&host, &["get", "c"]).stdout, "C-1");
+    assert_eq!(calls(&host), synced(&["ItemsGetAll"]), "a miss syncs once");
+    assert_eq!(run(&host, &["get", "c"]).stdout, "C-1");
+    assert_eq!(calls(&host), Vec::<String>::new(), "then the Copy holds it");
+
+    // A Secret that exists nowhere: one Sync, then `not_found`.
+    let nowhere = run(&host, &["get", "zz"]);
+    assert_eq!((nowhere.code, nowhere.stdout.as_str()), (2, ""));
+    assert_eq!(kinds(&nowhere.error()), ["not_found"]);
+    assert_eq!(calls(&host), SYNC);
+
+    // `--fresh` always syncs.
     host.change("b", "value", "B-2");
     for args in [
         &["get", "b", "--fresh"][..],
@@ -268,46 +285,60 @@ fn the_copy_answers_within_its_life_and_a_sync_gets_only_what_changed() {
         [synced(&["ItemsGetAll"]), synced(&[]), synced(&[])].concat()
     );
     assert_eq!(run(&host, &["get", "b"]).stdout, "B-2");
-    sealed(&host, &["A-1", "A-2", "B-1", "B-2"]);
+    sealed(&host, &["A-1", "A-2", "B-1", "B-2", "C-1"]);
 }
 
-/// Past its Life, a read whose Sync fails answers from the Copy, with one
-/// warning on stderr naming why and how old the Copy is; `--fresh` and a
-/// write still fail. A Copy that never synced has nothing to answer.
+/// With 1Password unreachable, reads of what the Copy holds answer with no
+/// call and no warning; a Secret it lacks tries one Sync, which fails, and
+/// is refused `not_found` after one warning naming why and how old the Copy
+/// is; `--fresh` and `mv` fail. A Copy that never synced has nothing to
+/// answer.
 #[test]
-fn past_its_life_a_read_whose_sync_fails_answers_from_the_copy_with_a_warning() {
+fn a_miss_whose_sync_fails_answers_from_the_copy_with_a_warning() {
     let host = host();
     assert_eq!(run(&host, &["put", "db", "--set", "A=1"]).code, 0);
     let mut state = host.state();
     state["core"]["fail"] = json!({ "ItemsList": "network unreachable" });
     host.set_state(&state);
+    host.age_copy(YEAR);
+    calls(&host);
 
-    let get = host.run(&["get", "db", "--field", "A"], &[TOKEN, STALE], None);
-    assert_eq!((get.code, get.stdout.as_str()), (0, "1"), "{}", get.stderr);
+    let get = run(&host, &["get", "db", "--field", "A"]);
+    assert_eq!(
+        (get.code, get.stdout.as_str(), get.stderr.as_str()),
+        (0, "1", "")
+    );
+    let env = run(&host, &["env", "db"]);
+    assert_eq!(
+        (env.code, env.stdout.as_str(), env.stderr.as_str()),
+        (0, "export A='1'\n", "")
+    );
+    let list = run(&host, &["list"]);
+    assert_eq!((list.code, list.stderr.as_str()), (0, ""));
+    assert_eq!(list.json()["secrets"][0]["service"], "db");
+    assert_eq!(calls(&host), Vec::<String>::new());
+
+    let miss = run(&host, &["get", "web"]);
+    assert_eq!((miss.code, miss.stdout.as_str()), (2, ""));
+    let (warning, error) = miss.stderr.split_once('\n').unwrap();
     assert!(
-        get.stderr.starts_with(
-            "warning: 1Password could not be synced (network unreachable); answering from the local copy synced "
+        warning.starts_with(
+            "warning: 1Password could not be synced (network unreachable); answering from the local copy synced 365d0h ago"
         ),
         "{}",
-        get.stderr
+        miss.stderr
     );
-    assert_eq!(get.stderr.lines().count(), 1, "{}", get.stderr);
-    let env = host.run(&["env", "db"], &[TOKEN, STALE], None);
-    assert_eq!((env.code, env.stdout.as_str()), (0, "export A='1'\n"));
-    assert!(env.stderr.starts_with("warning: "), "{}", env.stderr);
-    let list = host.run(&["list"], &[TOKEN, STALE], None);
-    assert_eq!(list.code, 0, "{}", list.stderr);
-    assert_eq!(list.json()["secrets"][0]["service"], "db");
-    assert!(list.stderr.starts_with("warning: "), "{}", list.stderr);
+    let error: Value = serde_json::from_str(error).unwrap();
+    assert_eq!(kinds(&error), ["not_found"]);
 
     let fresh = run(&host, &["get", "db", "--fresh"]);
     assert_eq!((fresh.code, fresh.stdout.as_str()), (2, ""));
     assert_eq!(kinds(&fresh.error()), ["vault_failed"]);
     // `mv` syncs first and fails; a `put` goes on from the Copy (decision
     // record 17), and here its write reaches 1Password: nothing waits.
-    let mv = host.run(&["mv", "db", "db2"], &[TOKEN, STALE], None);
+    let mv = run(&host, &["mv", "db", "db2"]);
     assert_eq!(kinds(&mv.json()), ["vault_failed"]);
-    let put = host.run(&["put", "db", "--set", "A=2"], &[TOKEN, STALE], None);
+    let put = run(&host, &["put", "db", "--set", "A=2"]);
     assert_eq!(
         (put.code, &put.json()["pending"]),
         (0, &json!(false)),
@@ -339,7 +370,7 @@ fn a_copy_whose_vault_id_changed_finds_the_vault_again() {
     host.set_state(&state);
     calls(&host);
 
-    let get = host.run(&["get", "db", "--field", "A"], &[TOKEN, STALE], None);
+    let get = run(&host, &["get", "db", "--field", "A", "--fresh"]);
     assert_eq!(
         (get.code, get.stdout.as_str(), get.stderr.as_str()),
         (0, "1", "")
@@ -349,7 +380,7 @@ fn a_copy_whose_vault_id_changed_finds_the_vault_again() {
         ["init_client", "ItemsList", "VaultsList", "ItemsList"],
         "the list on the old id fails, the vault is found again, the list retried"
     );
-    host.run(&["get", "db"], &[TOKEN, STALE], None);
+    run(&host, &["get", "db", "--fresh"]);
     assert_eq!(calls(&host), SYNC, "the new id is kept");
 }
 
@@ -811,7 +842,7 @@ fn a_secret_titled_with_a_slash_is_found_by_every_command_and_put_retitles_it_in
     );
 
     // Both titles of one Secret are two items of it, refused; `--fresh`
-    // sees the one another host added within the Copy's Life.
+    // sees the one another host added since the last Sync.
     let mut state = host.state();
     state["core"]["items"]
         .as_array_mut()
@@ -1381,7 +1412,7 @@ fn a_write_the_vault_cannot_take_now_waits_and_the_next_sync_pushes_it() {
 #[test]
 fn put_and_rm_wait_on_this_host_while_1password_cannot_be_reached() {
     let host = host();
-    let stale = |args: &[&str]| host.run(args, &[TOKEN, STALE], None);
+    let ran = |args: &[&str]| run(&host, args);
     for put in [
         &["put", "db", "--set", "A=1", "--set", "B=2"][..],
         &["put", "gone", "--set", "X=1"],
@@ -1407,7 +1438,7 @@ fn put_and_rm_wait_on_this_host_while_1password_cannot_be_reached() {
     let line = "1Password could not be reached (";
     let tail =
         "); stored on this host and written to the vault by the next command that reaches it";
-    let edit = stale(&["put", "db", "--set", "A=10"]);
+    let edit = ran(&["put", "db", "--set", "A=10"]);
     assert_eq!(edit.code, 0, "{}{}", edit.stdout, edit.stderr);
     assert_eq!(edit.json()["pending"], true, "{}", edit.stdout);
     assert!(
@@ -1417,28 +1448,28 @@ fn put_and_rm_wait_on_this_host_while_1password_cannot_be_reached() {
     );
     let new = host.run(
         &["put", "new", "--field-from-stdin", "TOKEN"],
-        &[TOKEN, STALE],
+        &[TOKEN],
         Some(b"s3cr3t-pending\n"),
     );
     assert_eq!(new.code, 0, "{}{}", new.stdout, new.stderr);
     assert_eq!(new.json()["pending"], true);
-    let rm = stale(&["rm", "gone"]);
+    let rm = ran(&["rm", "gone"]);
     assert_eq!(rm.code, 0, "{}{}", rm.stdout, rm.stderr);
     assert_eq!(
         rm.json(),
         json!({ "secret": "gone/default", "changed": true, "pending": true })
     );
-    let bad = stale(&["put", "a/b", "--set", "A=1"]);
+    let bad = ran(&["put", "a/b", "--set", "A=1"]);
     assert_eq!(kinds(&bad.json()), ["bad_name"]);
     sealed(&host, &["s3cr3t-pending"]);
 
-    assert_eq!(stale(&["get", "db", "--field", "A"]).stdout, "10");
-    assert_eq!(stale(&["get", "gone"]).code, 2);
+    assert_eq!(ran(&["get", "db", "--field", "A"]).stdout, "10");
+    assert_eq!(ran(&["get", "gone"]).code, 2);
     assert_eq!(
-        stale(&["env", "new"]).stdout,
+        ran(&["env", "new"]).stdout,
         "export TOKEN='s3cr3t-pending'\n"
     );
-    let listed = stale(&["list"]).json();
+    let listed = ran(&["list"]).json();
     let marks: Vec<(&str, &Value)> = listed["secrets"]
         .as_array()
         .unwrap()
@@ -1459,7 +1490,7 @@ fn put_and_rm_wait_on_this_host_while_1password_cannot_be_reached() {
     let mut state = host.state();
     state["core"]["fail"] = Value::Null;
     host.set_state(&state);
-    let pushed = stale(&["list"]);
+    let pushed = ran(&["list", "--fresh"]);
     assert_eq!(pushed.code, 0, "{}", pushed.stderr);
     let secrets = pushed.json()["secrets"].clone();
     assert!(
@@ -1488,8 +1519,52 @@ fn put_and_rm_wait_on_this_host_while_1password_cannot_be_reached() {
     let mut state = host.state();
     state["core"]["fail"] = json!({ "ItemsList": "You do not have permission" });
     host.set_state(&state);
-    let denied = stale(&["put", "db", "--set", "A=11"]);
+    let denied = ran(&["put", "db", "--set", "A=11"]);
     assert_eq!(denied.code, 2, "{}{}", denied.stdout, denied.stderr);
     assert_eq!(kinds(&denied.json()), ["vault_failed"]);
     assert!(!host.config().join("copy.pending").exists());
+}
+
+/// A write that waits is pushed by the next write, with no `--fresh`; until
+/// then every read warns of it, naming `optokens list --fresh`.
+#[test]
+fn a_waiting_write_is_pushed_by_the_next_put() {
+    let host = host();
+    assert_eq!(run(&host, &["put", "db", "--set", "A=1"]).code, 0);
+    let mut state = host.state();
+    state["core"]["fail"] = json!({ "ItemsPut": "error sending request" });
+    host.set_state(&state);
+    let put = run(&host, &["put", "db", "--set", "A=2"]);
+    assert_eq!((put.code, &put.json()["pending"]), (0, &json!(true)));
+    let mut state = host.state();
+    state["core"]["fail"] = Value::Null;
+    host.set_state(&state);
+    calls(&host);
+
+    let get = run(&host, &["get", "db", "--field", "A"]);
+    assert_eq!(get.stdout, "2");
+    assert!(
+        get.stderr
+            .starts_with("warning: 1 pending write(s) wait in `")
+            && get
+                .stderr
+                .contains("copy.pending`; `optokens list --fresh` pushes them"),
+        "{}",
+        get.stderr
+    );
+    assert_eq!(calls(&host), Vec::<String>::new(), "a read pushes nothing");
+
+    let next = run(&host, &["put", "web", "--set", "B=1"]);
+    assert_eq!((next.code, &next.json()["pending"]), (0, &json!(false)));
+    assert!(!host.config().join("copy.pending").exists(), "pushed");
+    let items = host.items();
+    let titles: Vec<&Value> = items
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| &i["title"])
+        .collect();
+    assert_eq!(titles, [&json!("db"), &json!("web")]);
+    let db = host.run(&["get", "db", "--field", "A", "--fresh"], &[TOKEN], None);
+    assert_eq!((db.stdout.as_str(), db.stderr.as_str()), ("2", ""));
 }
