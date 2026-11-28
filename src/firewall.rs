@@ -13,6 +13,14 @@ pub const GLOBAL_STATE: &[&str] = &["--getglobalstate"];
 pub const ALLOW_SIGNED: &[&str] = &["--getallowsigned"];
 /// What prints each program the firewall has a rule for, and the rule.
 pub const LIST_APPS: &[&str] = &["--listapps"];
+/// What prints whether the firewall lets connections reach the path that
+/// follows. It answers for the program's code identity, so it holds where
+/// `--listapps` shows another path: the firewall keeps one rule per identity,
+/// listed at the first path it saw. Seen on mac-studio, macOS 27, 2026-11-28:
+/// `--listapps` listed optokens only at `…/0.1.6/bin/optokens`, yet
+/// `--getappblocked …/0.1.14/bin/optokens` said "is permitted", and a 0.1.14
+/// one-time link was reachable.
+pub const APP_BLOCKED: &str = "--getappblocked";
 /// What prints a binary's signature, on stderr, for the path that follows.
 pub const SIGNATURE: &str = "-dv";
 
@@ -36,6 +44,23 @@ pub fn allows_downloaded_signed(stdout: &str) -> bool {
     stdout
         .lines()
         .any(|l| l.contains("downloaded signed software") && l.contains("ENABLED"))
+}
+
+/// The rule `--getappblocked` answers, as macOS 27 prints it:
+/// `Incoming connection to <path> is permitted.` or `… is blocked.`;
+/// `None` for any other answer.
+pub fn app_blocked(stdout: &str) -> Option<Rule> {
+    let line = stdout
+        .lines()
+        .find(|l| l.starts_with("Incoming connection"))?;
+    let line = line.trim_end().trim_end_matches('.');
+    if line.ends_with(" is permitted") {
+        Some(Rule::Allow)
+    } else if line.ends_with(" is blocked") {
+        Some(Rule::Block)
+    } else {
+        None
+    }
 }
 
 /// The rule `--listapps` gives `path`: each program is a line `N : <path>`
@@ -93,6 +118,14 @@ mod tests {
         assert_eq!(rule(apps, "/opt/a b/optokens"), Some(Rule::Block));
         assert_eq!(rule(apps, "/usr/bin/nc"), Some(Rule::Allow));
         assert_eq!(rule(apps, "/usr/bin"), None);
+        let permitted = "Incoming connection to /opt/homebrew/Cellar/optokens/0.1.14/bin/optokens is permitted.\n";
+        assert_eq!(app_blocked(permitted), Some(Rule::Allow));
+        assert_eq!(
+            app_blocked("Incoming connection to /x is blocked.\n"),
+            Some(Rule::Block)
+        );
+        assert_eq!(app_blocked("Unknown option\n"), None);
+        assert_eq!(app_blocked(""), None);
         let adhoc = "Executable=/x\nSignature=adhoc\nTeamIdentifier=not set\n";
         assert_eq!(team(adhoc), None);
         assert_eq!(team("Executable=/x\nTeamIdentifier=not set\n"), None);

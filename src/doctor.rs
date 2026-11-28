@@ -27,7 +27,7 @@ pub enum Finding {
     NoTailnetAddress,
     /// The tailnet has no HTTPS certificates for this host (`tailscale status --json` lists no `CertDomains`), so `tailscale cert` cannot be used and a link is served without TLS. Fix: turn on MagicDNS and HTTPS Certificates in the tailnet's DNS settings of the Tailscale admin console.
     NoCert,
-    /// macOS's application firewall refuses connections to this optokens binary: it has a rule blocking it (`socketfilterfw --listapps`), or no rule while its signature is not one the firewall lets in by itself (ad hoc, or no Developer ID while only signed software is let in), and with no one at the desktop to answer its prompt, each connection is refused. One-time links cannot then be reached from other devices. A `brew upgrade` moves the binary to a new path, which has no rule. Fix: the `sudo socketfilterfw --add <path> --unblockapp <path>` line it gives, or a release signed with a Developer ID.
+    /// macOS's application firewall refuses connections to this optokens binary: `socketfilterfw --getappblocked` says it is blocked, or, where that gives no answer, `--listapps` has no rule for it while its signature is not one the firewall lets in by itself (ad hoc, or no Developer ID while only signed software is let in), and with no one at the desktop to answer its prompt, each connection is refused. One-time links cannot then be reached from other devices. A `brew upgrade` moves the binary to a new path, which has no rule. Fix: the `sudo socketfilterfw --add <path> --unblockapp <path>` line it gives, or a release signed with a Developer ID.
     FirewallBlocks,
 }
 
@@ -196,16 +196,27 @@ fn check_firewall(fw: &Firewall, findings: &mut Vec<Refusal>) -> Value {
         return json!({ "enabled": false });
     }
     let binary = fw.binary.display().to_string();
-    let rule = ask(firewall::LIST_APPS)
+    // What the firewall answers for this binary decides; `--listapps` and the
+    // signature only when it gives no answer.
+    let answered = ask(&[firewall::APP_BLOCKED, &binary])
         .ok()
-        .and_then(|apps| firewall::rule(&apps, &binary));
+        .and_then(|said| firewall::app_blocked(&said));
+    let (rule, said_by) = match answered {
+        Some(rule) => (Some(rule), "--getappblocked"),
+        None => (
+            ask(firewall::LIST_APPS)
+                .ok()
+                .and_then(|apps| firewall::rule(&apps, &binary)),
+            "--listapps",
+        ),
+    };
     let team = run(&fw.codesign, &[firewall::SIGNATURE, &binary])
         .ok()
         .and_then(|ran| firewall::team(&ran.stderr));
     let fault = match rule {
         Some(Rule::Allow) => None,
         Some(Rule::Block) => Some(format!(
-            "macOS's firewall has a rule blocking incoming connections to `{binary}` (`socketfilterfw --listapps`)"
+            "macOS's firewall blocks incoming connections to `{binary}` (`socketfilterfw {said_by}`)"
         )),
         None => {
             let signed =

@@ -81,7 +81,9 @@ fn main() {
                 .to_string()
         }
         // `socketfilterfw`: `state` (default 1), `allow_signed` (default
-        // true), and `apps`, each `{ "path", "block" }`, as macOS 26 prints them.
+        // true), and `apps`, each `{ "path", "block" }`, as macOS 26 prints
+        // them; `app_blocked` (true or false) answers `--getappblocked` as
+        // macOS 27 does, and without it that is refused as unknown.
         (_, w) if program == "socketfilterfw" && w == firewall::GLOBAL_STATE => {
             let state = me["state"].as_u64().unwrap_or(1);
             let word = if state == 0 { "disabled" } else { "enabled" };
@@ -96,6 +98,18 @@ fn main() {
             format!(
                 "Automatically allow built-in signed software ENABLED.\nAutomatically allow downloaded signed software {word}."
             )
+        }
+        (_, [flag, path])
+            if program == "socketfilterfw"
+                && *flag == firewall::APP_BLOCKED
+                && me["app_blocked"].is_boolean() =>
+        {
+            let word = if me["app_blocked"] == true {
+                "blocked"
+            } else {
+                "permitted"
+            };
+            format!("Incoming connection to {path} is {word}.")
         }
         (_, w) if program == "socketfilterfw" && w == firewall::LIST_APPS => {
             let apps = me["apps"].as_array().cloned().unwrap_or_default();
