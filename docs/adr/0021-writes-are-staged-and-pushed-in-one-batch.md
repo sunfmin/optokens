@@ -22,4 +22,4 @@ Each process that reaches 1Password spends one of the account's 1000 requests a 
 
 Undo: every write's `--now` taken as given (`Writes::Now` in `src/commands.rs`'s `to_write` and `moved`).
 
-Note, 2026-11-28 (optokens#65, opcore's decision record 7): the account's daily requests count each read and write the token spends, not one per process. The Context's "one of the account's 1000 requests a day" per process was wrong; the decision stands, as a push's batch calls fold many changes into few reads and writes: `docs/budget.md`.
+Note, 2026-11-28 (measured on `sesame-scratch` with `op service-account ratelimit`, opcore's decision record 7): the account's daily requests count each read and write the token spends, not one per process. The Context's "one of the account's 1000 requests a day" per process was wrong; the decision stands, as a push's batch calls fold many changes into few reads and writes: `docs/budget.md`.

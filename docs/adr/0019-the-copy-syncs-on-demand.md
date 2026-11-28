@@ -19,4 +19,4 @@ With a Life, every read past it reached 1Password and spent one of the account's
 
 Undo: pass a Life to the Copy again in `src/store.rs`.
 
-Note, 2026-11-28 (optokens#65, opcore's decision record 7): the account's daily requests count each read and write the token spends, not one per process, so a read past the Life spent its reads, a Sync's at least one. The decision stands: on demand, the reads no one asked for are not made.
+Note, 2026-11-28 (measured on `sesame-scratch` with `op service-account ratelimit`, opcore's decision record 7): the account's daily requests count each read and write the token spends, not one per process, so a read past the Life spent its reads, a Sync's at least one. The decision stands: on demand, the reads no one asked for are not made.

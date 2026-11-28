@@ -202,11 +202,7 @@ fn rows() -> Vec<Row> {
         ("env", "env db"),
     ] {
         let command = format!("`{name}` from an old Copy");
-        rows.extend(steps(
-            &costs,
-            &host,
-            &[(&command, args, true, "", [0, 0])],
-        ));
+        rows.extend(steps(&costs, &host, &[(&command, args, true, "", [0, 0])]));
     }
     host.add(stored(
         "api1",
