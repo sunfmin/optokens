@@ -267,8 +267,8 @@ source = "docs/adr/0017-a-write-whose-sync-cannot-reach-1password-waits-too.md:2
 check = ["test"]
 
 [[promise]]
-name = "push-sends-every-staged-change-in-one-process"
-says = "`optokens push` sends every staged change in one process, in batch calls: each Secret's changes folded into one write (opcore's push), each made on the item as 1Password holds it then, then the pull of a Sync."
+name = "push-sends-every-staged-change-in-one-request"
+says = "`optokens push` sends every staged change in one process, one sign-in, its reads and writes the account's requests (decision record 23): each Secret's changes folded into one write (opcore's push), each made on the item as 1Password holds it then, then the pull of a Sync."
 source = "docs/adr/0021-writes-are-staged-and-pushed-in-one-batch.md:12"
 check = ["test"]
 

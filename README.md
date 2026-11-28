@@ -4,9 +4,9 @@ Keeps an agent's secrets in a 1Password vault through a service account, and tak
 
 It reaches 1Password through [opcore](https://github.com/sunfmin/opcore), which runs 1Password's SDK Core inside it: no 1Password CLI is needed.
 
-`put`, `mv` and `rm` stage their change on the host, sealed, and `optokens push` sends every staged change in one batch (`--now` pushes at once): changes reach 1Password and other hosts only then, and a host lost before a push loses them.
+`put`, `mv` and `rm` stage their change on the host, sealed, and `optokens push` sends every staged change in one batch, one process (`--now` pushes at once): changes reach 1Password and other hosts only then, and a host lost before a push loses them.
 
-The account's daily requests count each read and write, so a push's batch calls, not fewer processes, are what save them; what each command spends is `docs/budget.md`. Install on macOS or Linux with `brew install sunfmin/tap/optokens`; on Windows with `scoop bucket add sunfmin https://github.com/sunfmin/scoop-bucket` and then `scoop install optokens`. `put --fields` and `init` also need `tailscale`. A release is cut by `packaging/release.sh`.
+What each command spends of the service account's reads and writes and the account's daily requests is `docs/budget.md`. Install on macOS or Linux with `brew install sunfmin/tap/optokens`; on Windows with `scoop bucket add sunfmin https://github.com/sunfmin/scoop-bucket` and then `scoop install optokens`. `put --fields` and `init` also need `tailscale`. A release is cut by `packaging/release.sh`.
 
 The manual is `optokens --help`, and it is the only copy.
 

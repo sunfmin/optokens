@@ -1,9 +1,11 @@
 //! What each command spends of the service account's Budget, on the
-//! stand-in Core: each scenario asserts its Core calls and its reads and
-//! writes, which the account's daily requests count each of, and `docs/budget.md` is the table of them
-//! all, which this test fails on when it is stale. Each method's cost is
-//! read from opcore's decision record 1, the one home of the numbers, in
-//! the opcore source this build compiles (found by `cargo metadata`).
+//! stand-in Core: each scenario asserts its Core calls and its reads,
+//! writes, and `docs/budget.md` is the table of them all, with the
+//! account's requests they spend (one per read and per write, opcore's
+//! decision record 7), which this test fails on when it is stale. Each
+//! method's cost is read from opcore's decision record 1, the one home of
+//! the numbers, in the opcore source this build compiles (found by `cargo
+//! metadata`).
 #![cfg(unix)]
 
 mod common;
@@ -17,9 +19,14 @@ const TOKEN: (&str, &str) = ("OP_SERVICE_ACCOUNT_TOKEN", "ops_test_token");
 const YEAR: u64 = 365 * 86400;
 const FILE: &str = "docs/budget.md";
 
-/// Reads and writes. The account's daily requests count each of them
-/// (opcore's decision record 7), so its column is their sum.
+/// Reads and writes. The account's daily requests count each of both
+/// (opcore's decision record 7): `account`.
 type Budget = [u32; 2];
+
+/// The account's daily requests `b` spends: one per read and per write.
+fn account(b: Budget) -> u32 {
+    b[0] + b[1]
+}
 
 /// opcore's decision record 1: each method's cost, and what a sign-in's
 /// first vault call spends besides it.
@@ -76,7 +83,8 @@ fn costs() -> Costs {
         }
     }
     let lead = "A sign-in's first vault call:";
-    let line = adr.lines().find_map(|l| l.strip_prefix(lead)).unwrap();
+    let line = adr.lines().find_map(|l| l.strip_prefix(lead));
+    let line = line.unwrap_or_else(|| panic!("opcore's decision record 1 lacks `{lead}`"));
     let reads = line.split_whitespace().next().unwrap().parse().unwrap();
     assert!(!each.is_empty(), "opcore's decision record 1 has no table");
     Costs {
@@ -328,14 +336,14 @@ fn table(rows: &[Row]) -> String {
          is opcore's decision record 1, in the opcore source `Cargo.lock` pins. \
          Each command is a new process: its first vault \
          call after signing in spends one read more. The account's daily \
-         requests count each read and each write, so fewer calls, not fewer \
-         processes, save them. A call 1Password refuses spends nothing.\n\n\
+         requests count each read and each write (opcore's decision record 7). \
+         A call 1Password refuses spends nothing.\n\n\
          | Command | Core calls | Reads | Writes | Account requests |\n\
          |---|---|---|---|---|\n",
     );
     for r in rows {
         let [reads, writes] = r.spent;
-        let account = reads + writes;
+        let account = account(r.spent);
         let calls = calls(&r.calls);
         t.push_str(&format!(
             "| {} | {calls} | {reads} | {writes} | {account} |\n",
