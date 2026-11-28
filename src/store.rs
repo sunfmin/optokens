@@ -106,9 +106,9 @@ impl Store {
     pub fn find(&mut self, name: &Name) -> Result<Option<Found>, Refusal> {
         match self.held(name)? {
             None => {
-                if let Err(e) = self.copy.find(&name.title()) {
-                    return Err(self.refused(e));
-                }
+                // Only for its Sync: an error it meets, the Copy's read,
+                // the look again meets too, and refuses.
+                let _ = self.copy.find(&name.title());
                 self.held(name)
             }
             found => Ok(found),
