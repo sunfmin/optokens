@@ -780,6 +780,11 @@ fn without_a_token_nothing_reaches_1password() {
     let get = host.run(&["get", "db"], &[], None);
     assert_eq!((get.code, get.stdout.as_str()), (2, ""));
     assert_eq!(kinds(&get.error()), ["no_token"]);
+    for command in ["push", "status"] {
+        let ran = host.run(&[command], &[], None);
+        assert_eq!(ran.code, 2, "{command}: {}", ran.stdout);
+        assert_eq!(kinds(&ran.json()), ["no_token"], "{command}");
+    }
     assert_eq!(host.calls(), Value::Null);
 }
 
@@ -1366,6 +1371,27 @@ fn mv_onto_a_secret_or_an_untagged_title_refuses_and_writes_nothing() {
             .iter()
             .any(|m| ["ItemsPut", "ItemsCreateAll", "ItemsDeleteAll"].contains(&m.as_str())),
         "{methods:?}"
+    );
+    assert_eq!(host.items(), items);
+}
+
+/// A `--now` mv whose write 1Password refuses is refused with what it said,
+/// and the Secret keeps its old name.
+#[test]
+fn mv_whose_write_fails_is_refused_and_keeps_the_old_name() {
+    let host = host();
+    assert_eq!(run(&host, &["put", "--now", "a", "--set", "K=1"]).code, 0);
+    let items = host.items();
+    let mut state = host.state();
+    state["core"]["fail"] = json!({ "ItemsPut": "You do not have permission" });
+    host.set_state(&state);
+
+    let mv = run(&host, &["mv", "--now", "a", "b"]);
+    assert_eq!(mv.code, 2, "{}", mv.stdout);
+    assert_eq!(kinds(&mv.json()), ["vault_failed"]);
+    assert_eq!(
+        mv.json()["error"][0]["fault"],
+        "1Password: You do not have permission"
     );
     assert_eq!(host.items(), items);
 }

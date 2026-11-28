@@ -369,6 +369,12 @@
     "sentence": "Every command prints one JSON object on stdout; a failure is `{\"error\": …}` with a non-zero exit.",
     "source": "docs/adr/0001-one-json-object-but-get-and-env.md:5"
   },
+  "fc7c4eb18cc9": {
+    "kind": "fixed-often",
+    "mark": "not",
+    "summary": "src/secret.rs was changed by 2 fixes in 180 days, and no registered promise's check covers it",
+    "why": "No promise: optokens#27 reworded VaultFailed's rate-limit fix text (help prose, kept true by the help, not a promise of behaviour); optokens#2 was a behaviour-preserving refactor (NEEDS_LINK_FIX constant, merge built once, get --json/list share head(), Kind::parse dropped for ValueEnum) whose behaviour is kept by tests already registered (item-read-back-exactly, field-type-read-and-merged)."
+  },
   "fcbf0469ee0b": {
     "mark": "promise",
     "sentence": "A Sync is one list and one batch get of the items that changed, signed in to the vault id the Copy keeps: only its first Sync, or one whose kept id no longer names the vault, lists the vaults.",

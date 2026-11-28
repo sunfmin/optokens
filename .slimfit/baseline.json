@@ -20,6 +20,16 @@
     }
   ],
   "kept": [],
+  "kept_files": [
+    {
+      "suite": "rust",
+      "file": "src/secret.rs",
+      "prod_lines": 481,
+      "commits_90d": 20,
+      "commits_total": 20,
+      "reason": "Deep enough: the pure core of a Secret (Name, Kind, Values, Field, Fault) and the decisions put/get/env/list make on it behind a few functions (parse_set/parse_meta/stdin_value/pipe_field for put's inputs, merge, value, to_json/summary, exports), each doing real work (merge finds every fault at once and upserts Fields in order). Callers in commands.rs/item.rs/store.rs use only that interface; tests reach no private helper. Size is ~60 lines of Fault docs (the manual's refusal table) plus refusal wording; churn is features adding inputs and faults to the domain core, which belong here. Splitting put's input parsing out would spread one concept over two modules for no leverage."
+    }
+  ],
   "measured": {
     "rust": {
       "uncovered_lines": 57,

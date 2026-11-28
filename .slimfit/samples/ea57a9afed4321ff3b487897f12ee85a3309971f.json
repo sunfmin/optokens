@@ -1,0 +1,37 @@
+{
+  "tip": "ea57a9afed4321ff3b487897f12ee85a3309971f",
+  "from": "8deb40f5627c38e5bac511bed6b3a504c84cd004",
+  "pool": 469,
+  "drawn": {
+    "rust": [
+      {
+        "name": "src/init.rs:50:5: replace init -> Answer with Default::default()",
+        "outcome": "unviable"
+      },
+      {
+        "name": "src/commands.rs:140:38: delete ! in put_secret",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/store.rs:335:9: replace <impl Core for Backend>::init_client -> Result<String, Failure> with Ok(\"xyzzy\".into())",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/firewall.rs:39:28: replace != with == in enabled",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/secret.rs:255:5: replace bad_set -> Refusal with Default::default()",
+        "outcome": "unviable"
+      },
+      {
+        "name": "src/init.rs:88:24: replace || with && in enter",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/item.rs:297:5: replace candidates -> Result<Vec<&'a Item>, Refusal> with Ok(vec![])",
+        "outcome": "killed"
+      }
+    ]
+  }
+}
