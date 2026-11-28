@@ -21,6 +21,10 @@
 #                             Formula/optokens.rb, the manifest to the bucket's
 #                             bucket/optokens.json. Run again, it publishes the
 #                             same again: nothing that is there is in the way.
+#   release.sh push-file <repo> <path> <file> <message>
+#                             cut's last step alone: <repo>'s <path> is <file>,
+#                             rebased and pushed again while another cut beats
+#                             it; packaging/push_file_test.sh races it
 #
 # Homebrew and Scoop download from the tap (sunfmin/homebrew-tap) with no
 # login. `gh` must be allowed to write to the tap and the bucket.
@@ -42,7 +46,7 @@ DESC="Keeps an agent's secrets in a 1Password vault through a service account"
 NOTE="optokens needs tailscale, on a tailnet, for \`put --fields\` and \`init\`: they serve their one-time link on the tailnet only."
 
 usage() {
-    echo "usage: release.sh doctor | check-tag <vX.Y.Z> | dry | cut <vX.Y.Z>" >&2
+    echo "usage: release.sh doctor | check-tag <vX.Y.Z> | dry | cut <vX.Y.Z> | push-file <repo> <path> <file> <message>" >&2
     exit 2
 }
 
@@ -288,7 +292,10 @@ MANIFEST
 }
 
 # push_file <repo> <path> <file> <message>: <repo>'s <path> is <file>, by a
-# commit when it differs.
+# commit when it differs. Other repos' cuts push their own files to the same
+# tap and bucket; a push one of them beat is rebased onto it and pushed again,
+# up to 5 tries. The rebase fetches what is new since the depth-1 clone, whose
+# one commit it shares.
 push_file() {
     clone=$(mktemp -d)
     gh repo clone "$1" "$clone" -- --quiet --depth 1
@@ -299,7 +306,19 @@ push_file() {
         echo "release: $1's $2 is $4 already"
     else
         git -C "$clone" commit --quiet -m "$4"
-        git -C "$clone" push --quiet origin HEAD
+        branch=$(git -C "$clone" symbolic-ref --short HEAD)
+        tries=1
+        until err=$(git -C "$clone" push --quiet origin HEAD 2>&1); do
+            [ "$tries" -lt 5 ] || {
+                echo "$err" >&2
+                echo "release: $1 took no push of $2 in $tries tries" >&2
+                exit 1
+            }
+            echo "release: $1 moved under the push of $2, rebasing (try $tries)" >&2
+            sleep "$tries"
+            git -C "$clone" pull --rebase --quiet origin "$branch"
+            tries=$((tries + 1))
+        done
         echo "release: $1's $2 is $4"
     fi
     rm -rf "$clone"
@@ -334,6 +353,11 @@ dry)
     exit 0
     ;;
 
+push-file)
+    [ $# -eq 5 ] || usage
+    push_file "$2" "$3" "$4" "$5"
+    exit 0
+    ;;
 cut) [ $# -eq 2 ] || usage ;;
 *) usage ;;
 esac
