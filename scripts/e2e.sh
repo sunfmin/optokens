@@ -7,15 +7,16 @@
 # types checked in the vault through `op item get`, `ps` sampled during the put for the value, and the config directory
 # (the sealed Copy) searched for it. Outside the gate: it needs the network and a token.
 #
-#   scripts/e2e.sh <mytokens-profile> [vault]
+#   scripts/e2e.sh <optokens-profile> [vault]
 #
-# The Profile holds OP_SERVICE_ACCOUNT_TOKEN, a service account's token for
+# The optokens Profile (read by the installed optokens) holds
+# OP_SERVICE_ACCOUNT_TOKEN, a service account's token for
 # the vault (default `sesame-scratch`). The token stays in this process's
 # environment. The script writes only the item `e2e-<n>` and removes
 # it on any exit; it refuses to run unless optokens resolves the vault named.
 set -eu
 
-profile=${1:?usage: scripts/e2e.sh <mytokens-profile> [vault]}
+profile=${1:?usage: scripts/e2e.sh <optokens-profile> [vault]}
 vault=${2:-sesame-scratch}
 cd "$(dirname "$0")/.."
 [ -d "$HOME/.cargo/bin" ] && PATH="$HOME/.cargo/bin:$PATH"
@@ -31,7 +32,10 @@ check() { # <what> <jq filter that must be true> <json>
 cargo build --release --quiet
 bin=$PWD/target/release/optokens
 # What follows has the token: from here on nothing prints a value.
-eval "$(mytokens env "$profile")"
+# The installed optokens, before XDG_CONFIG_HOME moves to the scratch config;
+# without OP_SERVICE_ACCOUNT_TOKEN, which it would take over its own token file.
+OP_SERVICE_ACCOUNT_TOKEN=$(env -u OP_SERVICE_ACCOUNT_TOKEN optokens get "$profile" --field OP_SERVICE_ACCOUNT_TOKEN) ||
+    fail "the optokens Profile $profile has no OP_SERVICE_ACCOUNT_TOKEN"
 [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || fail "Profile $profile has no OP_SERVICE_ACCOUNT_TOKEN"
 export OP_SERVICE_ACCOUNT_TOKEN
 
