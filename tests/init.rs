@@ -65,7 +65,7 @@ fn files(host: &Host) -> Vec<String> {
 
 #[test]
 fn the_token_is_written_owner_only_and_checked_through_the_copy_and_a_second_run_is_the_same() {
-    let host = host(json!({}));
+    let host = host(json!({ "watch": true }));
     // An older, open token file and directory, which init replaces.
     let old = host.token_file(0o644);
     std::fs::set_permissions(host.config(), std::fs::Permissions::from_mode(0o755)).unwrap();

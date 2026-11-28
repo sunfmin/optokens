@@ -50,6 +50,7 @@ fn get(host: &Host, args: &[&str]) -> Ran {
 fn fields_over_plain_http_store_once_and_a_second_post_is_gone() {
     const MARKER: &str = "MARKER-5c1e-through-the-link";
     let host = tailnet(no_cert(), json!([]));
+    host.watch();
     let waiting = start(
         &host,
         &[

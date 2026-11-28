@@ -66,6 +66,15 @@ impl Host {
         host
     }
 
+    /// Has the stand-in Core record, on each call from now on, what any
+    /// process could see (`seen`: `ps` and `TMPDIR`), for a test of the
+    /// promise that a value is in neither.
+    pub fn watch(&self) {
+        let mut state = self.state();
+        state["core"]["watch"] = json!(true);
+        self.set_state(&state);
+    }
+
     pub fn state_file(&self) -> PathBuf {
         self.dir.path().join("state.json")
     }
