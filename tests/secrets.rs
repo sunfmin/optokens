@@ -558,6 +558,7 @@ fn a_single_value_is_got_bare_and_never_exported() {
 fn a_value_is_in_no_command_line_and_no_temporary_file() {
     const MARKER: &str = "MARKER-7f3a9c-never-in-argv";
     let host = host();
+    host.watch();
     let put = piped(
         &host,
         &[
@@ -1410,7 +1411,7 @@ fn a_rate_limit_is_refused_with_a_fix_that_names_both_budgets() {
 /// After a Sync, a write 1Password cannot take now (network, rate limit,
 /// down) waits, sealed in `copy.pending`: the command answers `pending:
 /// true` with a `warning:` line, reads show the write, and the next Sync
-/// that reaches the vault pushes it.
+/// that reaches the vault once its backoff is over pushes it.
 #[test]
 fn a_write_the_vault_cannot_take_now_waits_and_the_next_sync_pushes_it() {
     let host = host();
@@ -1469,6 +1470,9 @@ fn a_write_the_vault_cannot_take_now_waits_and_the_next_sync_pushes_it() {
     let mut state = host.state();
     state["core"]["fail"] = Value::Null;
     host.set_state(&state);
+    // A write that waits is due again after opcore's first backoff (1s after
+    // its failed push); a Sync before then leaves it waiting.
+    std::thread::sleep(std::time::Duration::from_secs(1));
     let list = run(&host, &["list", "--fresh"]);
     assert_eq!(list.code, 0, "{}", list.stderr);
     let fresh = run(&host, &["get", "db", "--field", "A", "--fresh"]);

@@ -16,10 +16,13 @@
 //!   section `fields` emptied;
 //! - `core.hang_ms`: each item call waits this long before it answers;
 //! - `core.released`: each client id released, in order;
+//! - `core.watch`: true to record `seen` on each call (every process's
+//!   command line is large, and each call loads and saves the whole state);
 //! - `calls`: every call, `{ "program": "core", "method", "ids", "seen",
-//!   "failed" }`, where `seen` is what any process could see then: every
-//!   command line (`ps`) and every file under `TMPDIR`, and `failed` is true
-//!   for a call it refused (which spends none of the Budget).
+//!   "failed" }`, where `seen` (only under `core.watch`) is what any process
+//!   could see then: every command line (`ps`) and every file under `TMPDIR`,
+//!   and `failed` is true for a call it refused (which spends none of the
+//!   Budget).
 //!
 //! As the real Core does, it answers an item's fields sorted by id, a field
 //! in no section with the section id `""`, and that unnamed section.
@@ -55,7 +58,10 @@ impl Standin {
     /// Records the call `method` (with the ids it names, `ids`), and answers
     /// the error injected for it.
     fn record(&self, state: &mut Value, method: &str, ids: &Value) -> Result<(), Failure> {
-        let call = json!({ "program": "core", "method": method, "ids": ids, "seen": seen() });
+        let mut call = json!({ "program": "core", "method": method, "ids": ids });
+        if state["core"]["watch"] == true {
+            call["seen"] = seen();
+        }
         match state["calls"].as_array_mut() {
             Some(calls) => calls.push(call),
             None => state["calls"] = json!([call]),
